@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server-puppeteer": "^2025.5.12",
+    "@sparticuz/chromium": "^131.0.0",
     "@supabase/supabase-js": "^2.0.0",
     "@woocommerce/woocommerce-rest-api": "^1.0.1",
     "axios": "^1.6.0",

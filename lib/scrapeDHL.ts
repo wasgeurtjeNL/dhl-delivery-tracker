@@ -1,21 +1,29 @@
 // lib/scrapeDHL.ts - ULTRA GEOPTIMALISEERDE VERSIE V2
+import puppeteer from 'puppeteer';
 import type { Browser, Page } from 'puppeteer';
 
-// Try to use stealth plugin, fall back to regular puppeteer if not available (e.g., in Vercel)
-let puppeteer: any;
-let isStealthAvailable = false;
+// Vercel-compatible Chromium for serverless environments
+let chromium: any = null;
+let isVercelEnvironment = false;
 
 try {
-  puppeteer = require('puppeteer-extra');
-  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-  puppeteer.use(StealthPlugin());
-  isStealthAvailable = true;
-  console.log('🕶️ Stealth plugin loaded successfully');
+  // Check if we're in Vercel environment
+  isVercelEnvironment = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+  
+  if (isVercelEnvironment) {
+    chromium = require('@sparticuz/chromium');
+    console.log('🌐 Using @sparticuz/chromium for Vercel serverless environment');
+  } else {
+    console.log('🔧 Using regular puppeteer for local development');
+  }
 } catch (error) {
-  console.log('⚠️ Stealth plugin not available, falling back to regular puppeteer');
-  puppeteer = require('puppeteer');
-  isStealthAvailable = false;
+  console.log('⚠️ @sparticuz/chromium not available, using regular puppeteer');
+  isVercelEnvironment = false;
 }
+
+// Temporarily disabled stealth plugin for testing
+// This version uses regular puppeteer without stealth features
+console.log('🔧 Using regular puppeteer without stealth plugin for testing');
 
 // Browser pool voor hergebruik
 class BrowserPool {
@@ -50,7 +58,8 @@ class BrowserPool {
     this.isInitializing = true;
     try {
       console.log('🔧 Creating new browser instance...');
-      this.browser = await puppeteer.launch({
+      
+      let launchOptions: any = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -66,7 +75,16 @@ class BrowserPool {
           '--disable-backgrounding-occluded-windows',
           '--disable-renderer-backgrounding'
         ]
-      });
+      };
+
+      // Use Vercel-compatible Chromium if available
+      if (isVercelEnvironment && chromium) {
+        launchOptions.executablePath = await chromium.executablePath();
+        launchOptions.args = chromium.args.concat(launchOptions.args);
+        console.log('🌐 Using Vercel-compatible Chromium executable');
+      }
+      
+      this.browser = await puppeteer.launch(launchOptions);
       
       // Auto cleanup na inactiviteit
       setTimeout(() => this.cleanup(), this.TIMEOUT);
