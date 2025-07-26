@@ -44,6 +44,9 @@ function detectServerlessEnvironment() {
   return pathDetected || envDetected || isVercelProduction;
 }
 
+// Chromium tar file URL for reliable Vercel deployment
+const CHROMIUM_TAR_URL = "https://github.com/Sparticuz/chromium/releases/download/v121.0.0/chromium-v121.0.0-pack.tar";
+
 // Initialize environment detection and chromium
 try {
   isServerlessEnvironment = detectServerlessEnvironment();
@@ -70,6 +73,7 @@ try {
   if (isServerlessEnvironment) {
     chromium = require('@sparticuz/chromium');
     console.log('🌐 Loaded @sparticuz/chromium for serverless environment');
+    console.log(`📦 Using Chromium tar URL: ${CHROMIUM_TAR_URL}`);
     console.log('⏳ Chromium executable path will be resolved during browser launch');
   } else {
     console.log('🔧 Using regular puppeteer for local development');
@@ -149,9 +153,9 @@ class BrowserPool {
         // Serverless environment - use @sparticuz/chromium
         try {
           console.log('🌐 Setting up serverless Chromium...');
-          console.log('📍 Resolving Chromium executable path...');
+          console.log('📍 Resolving Chromium executable path with tar URL...');
           
-          const executablePath = await chromium.executablePath();
+          const executablePath = await chromium.executablePath(CHROMIUM_TAR_URL);
           console.log(`✅ Chromium executable resolved: ${executablePath}`);
           
           const chromiumArgs = chromium.args || [];
