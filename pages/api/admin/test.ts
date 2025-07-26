@@ -24,7 +24,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { testType, payload } = req.body;
 
-  try {
     switch (testType) {
       case 'database':
         return await testDatabase(res);
@@ -42,10 +41,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: 'Unknown test type' });
     }
   } catch (error) {
-    console.error(`Test ${testType} error:`, error);
-    return res.status(500).json({ 
-      error: `Test ${testType} failed`,
-      message: error instanceof Error ? error.message : 'Unknown error'
+    console.error('Test API error:', error);
+    
+    // Handle authentication errors
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Admin authentication required'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }
@@ -395,23 +403,6 @@ async function simulateScenario(res: NextApiResponse, payload: any) {
   } catch (error) {
     return res.status(500).json({
       testType: 'simulate_scenario',
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-  
-  } catch (error) {
-    console.error('Test API error:', error);
-    
-    // Handle authentication errors
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Admin authentication required'
-      });
-    }
-    
-    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     });
