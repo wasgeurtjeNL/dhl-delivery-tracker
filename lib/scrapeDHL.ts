@@ -6,70 +6,64 @@ import type { Browser, Page } from 'puppeteer';
 let chromium: any = null;
 let isServerlessEnvironment = false;
 
-// AGGRESSIVE serverless environment detection
+// FOCUSED Vercel serverless environment detection
+// NOTE: Vercel uses AWS Lambda underneath for serverless functions,
+// which is why we still check for /var/task paths, but we don't install AWS Lambda separately
 function detectServerlessEnvironment() {
   const cwd = process.cwd();
   const home = process.env.HOME || '';
   
-  // CRITICAL: Direct path checks for serverless environments
-  const pathIndicators = [
-    cwd.includes('/var/task'),           // Vercel/AWS Lambda
-    cwd.includes('/tmp'),                // Temporary serverless env
+  // VERCEL-SPECIFIC path checks (Vercel runs on AWS Lambda internally)
+  const vercelPathIndicators = [
+    cwd.includes('/var/task'),           // Vercel uses AWS Lambda internally
+    cwd.startsWith('/var/task'),         // Vercel Lambda task directory
     home.includes('sbx_user'),           // Vercel sandbox user
     home.includes('/home/sbx_user'),     // Full Vercel user path
-    cwd.startsWith('/var/task'),         // AWS Lambda task directory
   ];
   
-  // Environment variable checks
-  const envIndicators = [
-    process.env.VERCEL,
-    process.env.VERCEL_ENV,
-    process.env.NEXT_PUBLIC_VERCEL_ENV,
-    process.env.VERCEL_URL,
-    process.env.AWS_LAMBDA_FUNCTION_NAME,
-    process.env.AWS_EXECUTION_ENV,
-    process.env.LAMBDA_TASK_ROOT,
-    process.env.AWS_LAMBDA_RUNTIME_API,
-    process.env.NETLIFY,
-    process.env.RENDER,
+  // VERCEL-SPECIFIC environment variable checks
+  const vercelEnvIndicators = [
+    process.env.VERCEL,                  // Main Vercel indicator
+    process.env.VERCEL_ENV,              // Vercel environment
+    process.env.NEXT_PUBLIC_VERCEL_ENV,  // Public Vercel env
+    process.env.VERCEL_URL,              // Vercel URL
+    process.env.VERCEL_REGION,           // Vercel region
   ];
   
-  // Check for serverless-specific file system characteristics
-  const fsIndicators = [
-    // Common serverless readonly filesystem indicators
-    process.platform === 'linux' && process.env.NODE_ENV === 'production' && !process.env.CI,
-    // Check if we're in a read-only environment (common in serverless)
-    cwd === '/var/task' || cwd === '/app' || cwd === '/usr/src/app'
-  ];
+  // Check for Vercel production environment
+  const isVercelProduction = (
+    process.env.NODE_ENV === 'production' && 
+    process.platform === 'linux' &&
+    !process.env.CI &&
+    !process.env.LOCAL
+  );
   
-  const pathDetected = pathIndicators.some(indicator => indicator);
-  const envDetected = envIndicators.some(indicator => indicator);
-  const fsDetected = fsIndicators.some(indicator => indicator);
+  const pathDetected = vercelPathIndicators.some(indicator => indicator);
+  const envDetected = vercelEnvIndicators.some(indicator => indicator);
   
-  return pathDetected || envDetected || fsDetected;
+  return pathDetected || envDetected || isVercelProduction;
 }
 
 // Initialize environment detection and chromium
 try {
   isServerlessEnvironment = detectServerlessEnvironment();
   
-  console.log('🔍 DETAILED Environment Analysis:');
+  console.log('🔍 VERCEL Environment Analysis:');
   console.log(`  - NODE_ENV: ${process.env.NODE_ENV}`);
   console.log(`  - Platform: ${process.platform}`);
   console.log(`  - CWD: ${process.cwd()}`);
   console.log(`  - HOME: ${process.env.HOME}`);
   console.log(`  - VERCEL: ${process.env.VERCEL}`);
   console.log(`  - VERCEL_ENV: ${process.env.VERCEL_ENV}`);
-  console.log(`  - AWS_LAMBDA_FUNCTION_NAME: ${process.env.AWS_LAMBDA_FUNCTION_NAME}`);
-  console.log(`  - LAMBDA_TASK_ROOT: ${process.env.LAMBDA_TASK_ROOT}`);
+  console.log(`  - VERCEL_URL: ${process.env.VERCEL_URL}`);
+  console.log(`  - VERCEL_REGION: ${process.env.VERCEL_REGION}`);
   console.log(`  - CWD includes /var/task: ${process.cwd().includes('/var/task')}`);
-  console.log(`  - CWD starts with /var/task: ${process.cwd().startsWith('/var/task')}`);
   console.log(`  - HOME includes sbx_user: ${(process.env.HOME || '').includes('sbx_user')}`);
-  console.log(`  - FINAL DETECTION: ${isServerlessEnvironment}`);
+  console.log(`  - VERCEL DETECTED: ${isServerlessEnvironment}`);
   
-  // FORCE serverless if we detect serverless-like paths but detection failed
+  // FORCE Vercel mode if we detect Vercel-like paths but detection failed
   if (!isServerlessEnvironment && (process.cwd().includes('/var/task') || (process.env.HOME || '').includes('sbx_user'))) {
-    console.log('🚨 FORCING serverless mode due to path detection!');
+    console.log('🚨 FORCING Vercel serverless mode due to path detection!');
     isServerlessEnvironment = true;
   }
   
@@ -90,13 +84,13 @@ try {
 } catch (error) {
   console.error('⚠️ Error during environment setup:', error);
   
-  // EMERGENCY fallback: if we're clearly in serverless but setup failed
+  // EMERGENCY fallback: if we're clearly in Vercel but setup failed
   if (process.cwd().includes('/var/task') || (process.env.HOME || '').includes('sbx_user')) {
-    console.log('🆘 EMERGENCY: Forcing serverless mode due to clear serverless environment');
+    console.log('🆘 EMERGENCY: Forcing Vercel mode due to clear Vercel environment');
     isServerlessEnvironment = true;
     try {
       chromium = require('@sparticuz/chromium');
-      console.log('🌐 Emergency loaded @sparticuz/chromium');
+      console.log('🌐 Emergency loaded @sparticuz/chromium for Vercel');
     } catch (emergencyError) {
       console.error('💥 Emergency chromium load failed:', emergencyError);
     }
