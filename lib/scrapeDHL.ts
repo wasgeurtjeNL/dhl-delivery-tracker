@@ -1,21 +1,10 @@
 // lib/scrapeDHL.ts - ULTRA GEOPTIMALISEERDE VERSIE V2
+import puppeteer from 'puppeteer';
 import type { Browser, Page } from 'puppeteer';
 
-// Try to use stealth plugin, fall back to regular puppeteer if not available (e.g., in Vercel)
-let puppeteer: any;
-let isStealthAvailable = false;
-
-try {
-  puppeteer = require('puppeteer-extra');
-  const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-  puppeteer.use(StealthPlugin());
-  isStealthAvailable = true;
-  console.log('🕶️ Stealth plugin loaded successfully');
-} catch (error) {
-  console.log('⚠️ Stealth plugin not available, falling back to regular puppeteer');
-  puppeteer = require('puppeteer');
-  isStealthAvailable = false;
-}
+// Temporarily disabled stealth plugin for testing
+// This version uses regular puppeteer without stealth features
+console.log('🔧 Using regular puppeteer without stealth plugin for testing');
 
 // Browser pool voor hergebruik
 class BrowserPool {
