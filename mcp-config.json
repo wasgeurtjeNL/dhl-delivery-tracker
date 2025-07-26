@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "browsermcp": {
+      "command": "npx",
+      "args": ["@browsermcp/mcp@latest", "start"]
+    },
+    "supabase": {
+      "command": "C:\\Users\\Gebruiker\\AppData\\Roaming\\npm\\mcp-server-supabase.cmd",
+      "args": [
+        "--project-ref=tswseenagjfwmxtbxjyj"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "sbp_6621600c48d00bdbb4065853a4e35833da250452"
+      }
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+      "env": {
+        "PUPPETEER_LAUNCH_OPTIONS": "{ \"headless\": true, \"args\": [\"--no-sandbox\", \"--disable-setuid-sandbox\", \"--disable-dev-shm-usage\"] }",
+        "ALLOW_DANGEROUS": "true"
+      }
+    }
+  }
+} 

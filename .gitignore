@@ -1,0 +1,179 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production build outputs
+/.next/
+/out/
+/build/
+/dist/
+
+# Environment variables (CRITICAL - contains API keys)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# TypeScript build info
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel deployment
+.vercel/
+
+# Testing
+/coverage/
+/.nyc_output/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Optional npm cache directory
+.npm/
+
+# Optional eslint cache
+.eslintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache/
+.parcel-cache/
+
+# Next.js cache
+.next/
+
+# Nuxt.js build / generate output
+.nuxt/
+
+# Gatsby files
+.cache/
+# Comment in the public line in if your project uses Gatsby and not Next.js
+# public/
+
+# Storybook build outputs
+.out/
+.storybook-out/
+
+# Temporary folders
+tmp/
+temp/
+
+# Editor directories and files
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+*.code-workspace
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Puppeteer browser downloads
+.cache/puppeteer/
+
+# Test files and temporary data
+test_*.json
+test_*.mjs
+test_*.js
+debug_*.mjs
+*.html
+*_test.*
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Database dumps
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated files
+generated/
+auto-generated/
+
+# IDE specific
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# Local configuration
+local.config.js
+local.config.ts
+
+# Performance monitoring
+.clinic/
+.autocannon/
+
+# Linting
+.eslintcache
+.stylelintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# SvelteKit build outputs
+.svelte-kit/
+
+# Lock files (keep package-lock.json for consistency)
+# yarn.lock
+# pnpm-lock.yaml
+
+# Sentry Config File
+.sentryclirc
+
+# Sourcemaps (optional - remove if you want to keep them)
+*.map
+
+# Local env files
+.env.example 
