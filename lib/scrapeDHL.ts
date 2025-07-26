@@ -1,101 +1,30 @@
 // lib/scrapeDHL.ts - ULTRA GEOPTIMALISEERDE VERSIE V2
-import puppeteer from 'puppeteer';
 import type { Browser, Page } from 'puppeteer';
 
-// Enhanced serverless environment detection and Chromium handling
-let chromium: any = null;
-let isServerlessEnvironment = false;
+// Proven working serverless setup based on Puppeteer-Vercel implementation
+let chrome: any = {};
+let puppeteer: any;
 
-// FOCUSED Vercel serverless environment detection
-// NOTE: Vercel uses AWS Lambda underneath for serverless functions,
-// which is why we still check for /var/task paths, but we don't install AWS Lambda separately
-function detectServerlessEnvironment() {
-  const cwd = process.cwd();
-  const home = process.env.HOME || '';
-  
-  // VERCEL-SPECIFIC path checks (Vercel runs on AWS Lambda internally)
-  const vercelPathIndicators = [
-    cwd.includes('/var/task'),           // Vercel uses AWS Lambda internally
-    cwd.startsWith('/var/task'),         // Vercel Lambda task directory
-    home.includes('sbx_user'),           // Vercel sandbox user
-    home.includes('/home/sbx_user'),     // Full Vercel user path
-  ];
-  
-  // VERCEL-SPECIFIC environment variable checks
-  const vercelEnvIndicators = [
-    process.env.VERCEL,                  // Main Vercel indicator
-    process.env.VERCEL_ENV,              // Vercel environment
-    process.env.NEXT_PUBLIC_VERCEL_ENV,  // Public Vercel env
-    process.env.VERCEL_URL,              // Vercel URL
-    process.env.VERCEL_REGION,           // Vercel region
-  ];
-  
-  // Check for Vercel production environment
-  const isVercelProduction = (
-    process.env.NODE_ENV === 'production' && 
-    process.platform === 'linux' &&
-    !process.env.CI &&
-    !process.env.LOCAL
-  );
-  
-  const pathDetected = vercelPathIndicators.some(indicator => indicator);
-  const envDetected = vercelEnvIndicators.some(indicator => indicator);
-  
-  return pathDetected || envDetected || isVercelProduction;
+// Environment detection based on AWS Lambda (which Vercel uses internally)
+if (process.env.AWS_LAMBDA_FUNCTION_VERSION) {
+  chrome = require('chrome-aws-lambda');
+  puppeteer = require('puppeteer-core');
+  console.log('🌐 Using chrome-aws-lambda for serverless environment');
+} else {
+  puppeteer = require('puppeteer');
+  console.log('🔧 Using regular puppeteer for local development');
 }
 
-// Chromium tar file URL for reliable Vercel deployment
-const CHROMIUM_TAR_URL = "https://github.com/Sparticuz/chromium/releases/download/v121.0.0/chromium-v121.0.0-pack.tar";
+// Simple debug logging 
+console.log('🔍 Environment Analysis:');
+console.log(`  - NODE_ENV: ${process.env.NODE_ENV}`);
+console.log(`  - AWS_LAMBDA_FUNCTION_VERSION: ${process.env.AWS_LAMBDA_FUNCTION_VERSION}`);
+console.log(`  - Platform: ${process.platform}`);
+console.log(`  - CWD: ${process.cwd()}`);
 
-// Initialize environment detection and chromium
-try {
-  isServerlessEnvironment = detectServerlessEnvironment();
-  
-  console.log('🔍 VERCEL Environment Analysis:');
-  console.log(`  - NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`  - Platform: ${process.platform}`);
-  console.log(`  - CWD: ${process.cwd()}`);
-  console.log(`  - HOME: ${process.env.HOME}`);
-  console.log(`  - VERCEL: ${process.env.VERCEL}`);
-  console.log(`  - VERCEL_ENV: ${process.env.VERCEL_ENV}`);
-  console.log(`  - VERCEL_URL: ${process.env.VERCEL_URL}`);
-  console.log(`  - VERCEL_REGION: ${process.env.VERCEL_REGION}`);
-  console.log(`  - CWD includes /var/task: ${process.cwd().includes('/var/task')}`);
-  console.log(`  - HOME includes sbx_user: ${(process.env.HOME || '').includes('sbx_user')}`);
-  console.log(`  - VERCEL DETECTED: ${isServerlessEnvironment}`);
-  
-  // FORCE Vercel mode if we detect Vercel-like paths but detection failed
-  if (!isServerlessEnvironment && (process.cwd().includes('/var/task') || (process.env.HOME || '').includes('sbx_user'))) {
-    console.log('🚨 FORCING Vercel serverless mode due to path detection!');
-    isServerlessEnvironment = true;
-  }
-  
-  if (isServerlessEnvironment) {
-    chromium = require('@sparticuz/chromium');
-    console.log('🌐 Loaded @sparticuz/chromium for serverless environment');
-    console.log(`📦 Using Chromium tar URL: ${CHROMIUM_TAR_URL}`);
-    console.log('⏳ Chromium executable path will be resolved during browser launch');
-  } else {
-    console.log('🔧 Using regular puppeteer for local development');
-  }
-} catch (error) {
-  console.error('⚠️ Error during environment setup:', error);
-  
-  // EMERGENCY fallback: if we're clearly in Vercel but setup failed
-  if (process.cwd().includes('/var/task') || (process.env.HOME || '').includes('sbx_user')) {
-    console.log('🆘 EMERGENCY: Forcing Vercel mode due to clear Vercel environment');
-    isServerlessEnvironment = true;
-    try {
-      chromium = require('@sparticuz/chromium');
-      console.log('🌐 Emergency loaded @sparticuz/chromium for Vercel');
-      console.log('⏳ Emergency chromium executable path will be resolved during browser launch');
-    } catch (emergencyError) {
-      console.error('💥 Emergency chromium load failed:', emergencyError);
-    }
-  } else {
-    isServerlessEnvironment = false;
-  }
-}
+// Simple check for serverless environment
+const isServerlessEnvironment = !!process.env.AWS_LAMBDA_FUNCTION_VERSION;
+console.log(`🔍 Serverless Environment Detected: ${isServerlessEnvironment}`);
 
 // Browser pool voor hergebruik
 class BrowserPool {
@@ -149,51 +78,30 @@ class BrowserPool {
         '--disable-extensions'
       ];
 
-      if (isServerlessEnvironment && chromium) {
-        // Serverless environment - use @sparticuz/chromium
-        try {
-          console.log('🌐 Setting up serverless Chromium...');
-          console.log('📍 Resolving Chromium executable path with tar URL...');
-          
-          const executablePath = await chromium.executablePath(CHROMIUM_TAR_URL);
-          console.log(`✅ Chromium executable resolved: ${executablePath}`);
-          
-          const chromiumArgs = chromium.args || [];
-          const allArgs = [...chromiumArgs, ...baseArgs];
-          
-          const launchOptions = {
-            args: allArgs,
-            executablePath: executablePath,
-            headless: true,
-            ignoreDefaultArgs: false
-          };
-          
-          console.log(`🚀 Launching puppeteer-core with options:`, JSON.stringify({
-            executablePath: launchOptions.executablePath,
-            argsCount: launchOptions.args.length,
-            headless: launchOptions.headless
-          }));
-          
-          const puppeteerCore = require('puppeteer-core');
-          this.browser = await puppeteerCore.launch(launchOptions);
-          
-          console.log('✅ Serverless browser launched successfully!');
-          
-        } catch (chromiumError) {
-          console.error('❌ Serverless Chromium setup failed:', chromiumError);
-          console.log('🔄 Falling back to regular puppeteer (this will likely fail in serverless)...');
-          
-          // Fallback attempt (will likely fail in serverless)
-          this.browser = await puppeteer.launch({
-            headless: true,
-            args: baseArgs
-          });
-        }
+      // Browser launch options based on environment
+      let launchOptions: any = {};
+
+      if (isServerlessEnvironment) {
+        // Serverless environment - use chrome-aws-lambda approach
+        console.log('🌐 Setting up chrome-aws-lambda for serverless...');
+        
+        launchOptions = {
+          args: [...chrome.args, ...baseArgs],
+          defaultViewport: chrome.defaultViewport,
+          executablePath: await chrome.executablePath,
+          headless: true,
+          ignoreHTTPSErrors: true,
+        };
+        
+        console.log('🚀 Launching puppeteer-core with chrome-aws-lambda');
+        this.browser = await puppeteer.launch(launchOptions);
+        console.log('✅ Serverless browser launched successfully!');
+        
       } else {
         // Local environment - use regular puppeteer
         console.log('🔧 Setting up local Puppeteer...');
         
-        const launchOptions = {
+        launchOptions = {
           headless: true,
           args: baseArgs
         };
