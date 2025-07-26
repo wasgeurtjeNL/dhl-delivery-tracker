@@ -5,6 +5,7 @@ import type { Browser, Page } from 'puppeteer';
 // Enhanced serverless environment detection and Chromium handling
 let chromium: any = null;
 let isServerlessEnvironment = false;
+let chromiumExecutablePath: string | null = null;
 
 // FOCUSED Vercel serverless environment detection
 // NOTE: Vercel uses AWS Lambda underneath for serverless functions,
@@ -71,12 +72,13 @@ try {
     chromium = require('@sparticuz/chromium');
     console.log('🌐 Loaded @sparticuz/chromium for serverless environment');
     
-    // Test chromium functionality immediately
+    // Test chromium functionality immediately and cache the path
     try {
-      const execPath = await chromium.executablePath();
-      console.log(`✅ Chromium executable path: ${execPath}`);
+      chromiumExecutablePath = await chromium.executablePath();
+      console.log(`✅ Chromium executable path cached: ${chromiumExecutablePath}`);
     } catch (chromiumTestError) {
       console.error('❌ Failed to get chromium executable path:', chromiumTestError);
+      chromiumExecutablePath = null;
     }
   } else {
     console.log('🔧 Using regular puppeteer for local development');
@@ -91,6 +93,15 @@ try {
     try {
       chromium = require('@sparticuz/chromium');
       console.log('🌐 Emergency loaded @sparticuz/chromium for Vercel');
+      
+      // Also try to get the executable path for emergency fallback
+      try {
+        chromiumExecutablePath = await chromium.executablePath();
+        console.log(`🆘 Emergency Chromium executable path cached: ${chromiumExecutablePath}`);
+      } catch (emergencyPathError) {
+        console.error('💥 Emergency path resolution failed:', emergencyPathError);
+        chromiumExecutablePath = null;
+      }
     } catch (emergencyError) {
       console.error('💥 Emergency chromium load failed:', emergencyError);
     }
@@ -151,25 +162,28 @@ class BrowserPool {
         '--disable-extensions'
       ];
 
-      if (isServerlessEnvironment && chromium) {
+      if (isServerlessEnvironment && chromium && chromiumExecutablePath) {
         // Serverless environment - use @sparticuz/chromium
         try {
           console.log('🌐 Setting up serverless Chromium...');
-          
-          const executablePath = await chromium.executablePath();
-          console.log(`📍 Chromium executable: ${executablePath}`);
+          console.log(`📍 Using cached Chromium executable: ${chromiumExecutablePath}`);
           
           const chromiumArgs = chromium.args || [];
           const allArgs = [...chromiumArgs, ...baseArgs];
           
           const launchOptions = {
             args: allArgs,
-            executablePath: executablePath,
+            executablePath: chromiumExecutablePath,
             headless: true,
             ignoreDefaultArgs: false
           };
           
-          console.log('🚀 Launching with puppeteer-core and custom Chromium...');
+          console.log(`🚀 Launching puppeteer-core with options:`, JSON.stringify({
+            executablePath: launchOptions.executablePath,
+            argsCount: launchOptions.args.length,
+            headless: launchOptions.headless
+          }));
+          
           const puppeteerCore = require('puppeteer-core');
           this.browser = await puppeteerCore.launch(launchOptions);
           
@@ -184,6 +198,31 @@ class BrowserPool {
             headless: true,
             args: baseArgs
           });
+        }
+      } else if (isServerlessEnvironment && !chromiumExecutablePath) {
+        // Serverless detected but no executable path - this is a problem
+        console.error('❌ Serverless environment detected but no Chromium executable path available!');
+        console.log('🆘 Attempting emergency Chromium setup...');
+        
+        try {
+          if (!chromium) {
+            chromium = require('@sparticuz/chromium');
+          }
+          const emergencyPath = await chromium.executablePath();
+          console.log(`🆘 Emergency Chromium path: ${emergencyPath}`);
+          
+          const puppeteerCore = require('puppeteer-core');
+          this.browser = await puppeteerCore.launch({
+            args: [...chromium.args, ...baseArgs],
+            executablePath: emergencyPath,
+            headless: true,
+            ignoreDefaultArgs: false
+          });
+          
+          console.log('✅ Emergency serverless browser launched!');
+        } catch (emergencyError) {
+          console.error('💥 Emergency serverless setup failed:', emergencyError);
+          throw new Error('Serverless browser setup failed completely');
         }
       } else {
         // Local environment - use regular puppeteer
