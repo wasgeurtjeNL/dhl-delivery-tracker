@@ -6,10 +6,22 @@ import type { Browser, Page } from 'puppeteer';
 let chromium: any = null;
 let isServerlessEnvironment = false;
 
-// Robust serverless environment detection
+// AGGRESSIVE serverless environment detection
 function detectServerlessEnvironment() {
-  // Multiple ways to detect serverless/Vercel environment
-  const serverlessIndicators = [
+  const cwd = process.cwd();
+  const home = process.env.HOME || '';
+  
+  // CRITICAL: Direct path checks for serverless environments
+  const pathIndicators = [
+    cwd.includes('/var/task'),           // Vercel/AWS Lambda
+    cwd.includes('/tmp'),                // Temporary serverless env
+    home.includes('sbx_user'),           // Vercel sandbox user
+    home.includes('/home/sbx_user'),     // Full Vercel user path
+    cwd.startsWith('/var/task'),         // AWS Lambda task directory
+  ];
+  
+  // Environment variable checks
+  const envIndicators = [
     process.env.VERCEL,
     process.env.VERCEL_ENV,
     process.env.NEXT_PUBLIC_VERCEL_ENV,
@@ -18,50 +30,79 @@ function detectServerlessEnvironment() {
     process.env.AWS_EXECUTION_ENV,
     process.env.LAMBDA_TASK_ROOT,
     process.env.AWS_LAMBDA_RUNTIME_API,
-    // Additional checks for serverless environments
-    process.cwd().includes('/var/task'),
-    process.cwd().includes('/tmp'),
-    typeof process.env.HOME !== 'undefined' && process.env.HOME.includes('sbx_user')
+    process.env.NETLIFY,
+    process.env.RENDER,
   ];
   
-  const isServerless = serverlessIndicators.some(indicator => indicator);
+  // Check for serverless-specific file system characteristics
+  const fsIndicators = [
+    // Common serverless readonly filesystem indicators
+    process.platform === 'linux' && process.env.NODE_ENV === 'production' && !process.env.CI,
+    // Check if we're in a read-only environment (common in serverless)
+    cwd === '/var/task' || cwd === '/app' || cwd === '/usr/src/app'
+  ];
   
-  // Also check if we're in production and likely serverless
-  const isProductionServerless = process.env.NODE_ENV === 'production' && 
-    (process.platform === 'linux' && !process.env.CI);
+  const pathDetected = pathIndicators.some(indicator => indicator);
+  const envDetected = envIndicators.some(indicator => indicator);
+  const fsDetected = fsIndicators.some(indicator => indicator);
   
-  return isServerless || isProductionServerless;
+  return pathDetected || envDetected || fsDetected;
 }
 
 // Initialize environment detection and chromium
 try {
   isServerlessEnvironment = detectServerlessEnvironment();
   
-  console.log('🔍 Environment Analysis:');
+  console.log('🔍 DETAILED Environment Analysis:');
   console.log(`  - NODE_ENV: ${process.env.NODE_ENV}`);
   console.log(`  - Platform: ${process.platform}`);
   console.log(`  - CWD: ${process.cwd()}`);
+  console.log(`  - HOME: ${process.env.HOME}`);
   console.log(`  - VERCEL: ${process.env.VERCEL}`);
+  console.log(`  - VERCEL_ENV: ${process.env.VERCEL_ENV}`);
   console.log(`  - AWS_LAMBDA_FUNCTION_NAME: ${process.env.AWS_LAMBDA_FUNCTION_NAME}`);
   console.log(`  - LAMBDA_TASK_ROOT: ${process.env.LAMBDA_TASK_ROOT}`);
-  console.log(`  - Detected serverless: ${isServerlessEnvironment}`);
+  console.log(`  - CWD includes /var/task: ${process.cwd().includes('/var/task')}`);
+  console.log(`  - CWD starts with /var/task: ${process.cwd().startsWith('/var/task')}`);
+  console.log(`  - HOME includes sbx_user: ${(process.env.HOME || '').includes('sbx_user')}`);
+  console.log(`  - FINAL DETECTION: ${isServerlessEnvironment}`);
+  
+  // FORCE serverless if we detect serverless-like paths but detection failed
+  if (!isServerlessEnvironment && (process.cwd().includes('/var/task') || (process.env.HOME || '').includes('sbx_user'))) {
+    console.log('🚨 FORCING serverless mode due to path detection!');
+    isServerlessEnvironment = true;
+  }
   
   if (isServerlessEnvironment) {
     chromium = require('@sparticuz/chromium');
     console.log('🌐 Loaded @sparticuz/chromium for serverless environment');
     
-    // Test chromium functionality
-    chromium.executablePath().then((path: string) => {
-      console.log(`✅ Chromium executable path: ${path}`);
-    }).catch((error: any) => {
-      console.error('❌ Failed to get chromium executable path:', error);
-    });
+    // Test chromium functionality immediately
+    try {
+      const execPath = await chromium.executablePath();
+      console.log(`✅ Chromium executable path: ${execPath}`);
+    } catch (chromiumTestError) {
+      console.error('❌ Failed to get chromium executable path:', chromiumTestError);
+    }
   } else {
     console.log('🔧 Using regular puppeteer for local development');
   }
 } catch (error) {
   console.error('⚠️ Error during environment setup:', error);
-  isServerlessEnvironment = false;
+  
+  // EMERGENCY fallback: if we're clearly in serverless but setup failed
+  if (process.cwd().includes('/var/task') || (process.env.HOME || '').includes('sbx_user')) {
+    console.log('🆘 EMERGENCY: Forcing serverless mode due to clear serverless environment');
+    isServerlessEnvironment = true;
+    try {
+      chromium = require('@sparticuz/chromium');
+      console.log('🌐 Emergency loaded @sparticuz/chromium');
+    } catch (emergencyError) {
+      console.error('💥 Emergency chromium load failed:', emergencyError);
+    }
+  } else {
+    isServerlessEnvironment = false;
+  }
 }
 
 // Browser pool voor hergebruik
