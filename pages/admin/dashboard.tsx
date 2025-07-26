@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import ProgressIndicator, { useProgress } from '../../components/ProgressIndicator';
+import { useAuth } from '../../lib/useAuth';
 
 interface KPIData {
   activeTrackings: number;
@@ -40,6 +41,7 @@ interface Tracking {
 }
 
 export default function Dashboard() {
+  const { isAuthenticated, loading: authLoading, logout, requireAuth } = useAuth();
   const [kpis, setKpis] = useState<KPIData>({
     activeTrackings: 0,
     emailsToday: 0,
@@ -55,6 +57,11 @@ export default function Dashboard() {
   const loadingProgress = useProgress();
   const trackingCheckProgress = useProgress();
   const refreshProgress = useProgress();
+
+  // Check authentication
+  if (!requireAuth()) {
+    return null;
+  }
   
   // Pausable tracking check state
   const [trackingCheckSession, setTrackingCheckSession] = useState<{
@@ -276,7 +283,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -334,6 +341,13 @@ export default function Dashboard() {
             >
               ⚙️ Settings
             </a>
+            
+            <button
+              onClick={logout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              🚪 Logout
+            </button>
             
             {/* Tracking Check Controls */}
             {trackingCheckSession.status === 'idle' && (

@@ -1,6 +1,7 @@
 // pages/api/admin/settings.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
+import { requireAdminAuth } from '../../../lib/adminAuth';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -58,6 +59,9 @@ const DEFAULT_SETTINGS: SystemSettings = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
+    // Check authentication
+    requireAdminAuth(req);
+    
     switch (req.method) {
       case 'GET':
         return await getSettings(res);
@@ -68,6 +72,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   } catch (error) {
     console.error('Settings API error:', error);
+    
+    // Handle authentication errors
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Admin authentication required'
+      });
+    }
+    
     return res.status(500).json({ 
       error: 'Failed to handle settings request',
       message: error instanceof Error ? error.message : 'Unknown error'

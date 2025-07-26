@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
+import { useAuth } from '../../lib/useAuth';
 
 // Directe Supabase client voor logs
 const supabase = createClient(
@@ -52,6 +53,7 @@ interface Filters {
 }
 
 export default function TrackingDashboard() {
+  const { isAuthenticated, loading: authLoading, logout, requireAuth } = useAuth();
   const [trackings, setTrackings] = useState<Tracking[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({
@@ -62,6 +64,11 @@ export default function TrackingDashboard() {
     showing: 0,
     filteredTotal: 0
   });
+
+  // Check authentication
+  if (!requireAuth()) {
+    return null;
+  }
   const [stats, setStats] = useState<any>(null);
   
   // Filter state
@@ -493,13 +500,19 @@ export default function TrackingDashboard() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center justify-between mb-4">
             <a
               href="/admin/dashboard"
               className="text-blue-600 hover:text-blue-800 flex items-center gap-2"
             >
               ← Back to Dashboard
             </a>
+            <button
+              onClick={logout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              🚪 Logout
+            </button>
           </div>
           <h1 className="text-3xl font-bold text-gray-900">📦 Tracking Dashboard</h1>
           <p className="text-gray-600">Overzicht van alle tracking records met zoek en filter mogelijkheden</p>
@@ -668,11 +681,11 @@ export default function TrackingDashboard() {
               
                              <button
                  onClick={refreshWithDHLData}
-                 disabled={loading || queueProgress.isRunning}
+                 disabled={loading || authLoading || queueProgress.isRunning}
                  className="px-4 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                  title="Ververs alle DHL tracking data (wordt 1 voor 1 afgehandeld)"
                >
-                 {loading || queueProgress.isRunning ? '🔄' : '🚛'} DHL Refresh
+                 {loading || authLoading || queueProgress.isRunning ? '🔄' : '🚛'} DHL Refresh
                </button>
             </div>
           </div>
@@ -798,7 +811,7 @@ export default function TrackingDashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {loading ? (
+                {loading || authLoading ? (
                   <tr>
                     <td colSpan={12} className="px-6 py-4 text-center text-gray-500">
                       🔄 Laden...
@@ -993,7 +1006,7 @@ export default function TrackingDashboard() {
           </div>
 
           {/* Pagination */}
-          {!loading && trackings.length > 0 && (
+          {!loading && !authLoading && trackings.length > 0 && (
             <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6">
               <div className="flex flex-1 justify-between sm:hidden">
                 <button

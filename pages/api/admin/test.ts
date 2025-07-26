@@ -6,6 +6,7 @@ import { sendMandrillEmail } from '@/lib/sendMandrillMail';
 import { wcApi } from '@/lib/woocommerce';
 import { getCustomerIdByEmail } from '@/lib/getCustomerIdByEmail';
 import { addPointsToCustomer } from '@/lib/addPointsToCustomer';
+import { requireAdminAuth } from '../../../lib/adminAuth';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -13,11 +14,15 @@ const supabase = createClient(
 );
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  try {
+    // Check authentication
+    requireAdminAuth(req);
+    
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
 
-  const { testType, payload } = req.body;
+    const { testType, payload } = req.body;
 
   try {
     switch (testType) {
@@ -390,6 +395,23 @@ async function simulateScenario(res: NextApiResponse, payload: any) {
   } catch (error) {
     return res.status(500).json({
       testType: 'simulate_scenario',
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+  
+  } catch (error) {
+    console.error('Test API error:', error);
+    
+    // Handle authentication errors
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Admin authentication required'
+      });
+    }
+    
+    return res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     });

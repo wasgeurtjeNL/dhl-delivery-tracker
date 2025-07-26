@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import ProgressIndicator, { useProgress } from '../../components/ProgressIndicator';
+import { useAuth } from '../../lib/useAuth';
 
 interface SystemSettings {
   id?: number;
@@ -28,6 +29,7 @@ interface SystemSettings {
 }
 
 export default function AdminSettings() {
+  const { isAuthenticated, loading: authLoading, logout, requireAuth } = useAuth();
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,6 +47,11 @@ export default function AdminSettings() {
   const saveProgress = useProgress();
   const testProgress = useProgress();
   const overrideProgress = useProgress();
+
+  // Check authentication
+  if (!requireAuth()) {
+    return null;
+  }
 
   // Form states
   const [formData, setFormData] = useState<SystemSettings | null>(null);
@@ -435,7 +442,7 @@ export default function AdminSettings() {
     }
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -455,13 +462,19 @@ export default function AdminSettings() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center justify-between mb-4">
             <a
               href="/admin/dashboard"
               className="text-blue-600 hover:text-blue-800 flex items-center gap-2"
             >
               ← Back to Dashboard
             </a>
+            <button
+              onClick={logout}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              🚪 Logout
+            </button>
           </div>
           <h1 className="text-3xl font-bold text-gray-900">⚙️ Admin Settings</h1>
           <p className="text-gray-600">Configure tracking system settings, run tests, and manage overrides</p>
