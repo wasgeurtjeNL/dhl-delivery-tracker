@@ -6,9 +6,22 @@ import type { Browser, Page } from 'puppeteer';
 let chromium: any = null;
 let isVercelEnvironment = false;
 
+// Better Vercel environment detection
+const detectVercelEnvironment = () => {
+  // Check multiple Vercel-specific environment variables
+  return !!(
+    process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.NEXT_PUBLIC_VERCEL_ENV ||
+    process.env.VERCEL_URL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME || // Vercel uses AWS Lambda
+    (process.env.NODE_ENV === 'production' && process.env.LAMBDA_TASK_ROOT)
+  );
+};
+
 try {
-  // Check if we're in Vercel environment
-  isVercelEnvironment = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+  isVercelEnvironment = detectVercelEnvironment();
+  console.log(`🔍 Environment detection: isVercel=${isVercelEnvironment}, NODE_ENV=${process.env.NODE_ENV}`);
   
   if (isVercelEnvironment) {
     chromium = require('@sparticuz/chromium');
@@ -17,7 +30,7 @@ try {
     console.log('🔧 Using regular puppeteer for local development');
   }
 } catch (error) {
-  console.log('⚠️ @sparticuz/chromium not available, using regular puppeteer');
+  console.log('⚠️ @sparticuz/chromium not available, using regular puppeteer:', error);
   isVercelEnvironment = false;
 }
 
@@ -79,12 +92,22 @@ class BrowserPool {
 
       // Use Vercel-compatible Chromium if available
       if (isVercelEnvironment && chromium) {
-        launchOptions.executablePath = await chromium.executablePath();
-        launchOptions.args = chromium.args.concat(launchOptions.args);
-        console.log('🌐 Using Vercel-compatible Chromium executable');
+        try {
+          launchOptions.executablePath = await chromium.executablePath();
+          launchOptions.args = chromium.args.concat(launchOptions.args);
+          console.log('🌐 Using Vercel-compatible Chromium executable');
+          
+          // In Vercel, use puppeteer-core with custom executable
+          const puppeteerCore = require('puppeteer-core');
+          this.browser = await puppeteerCore.launch(launchOptions);
+        } catch (chromiumError) {
+          console.error('❌ Failed to use @sparticuz/chromium, falling back to regular puppeteer:', chromiumError);
+          // Fallback to regular puppeteer
+          this.browser = await puppeteer.launch(launchOptions);
+        }
+      } else {
+        this.browser = await puppeteer.launch(launchOptions);
       }
-      
-      this.browser = await puppeteer.launch(launchOptions);
       
       // Auto cleanup na inactiviteit
       setTimeout(() => this.cleanup(), this.TIMEOUT);
