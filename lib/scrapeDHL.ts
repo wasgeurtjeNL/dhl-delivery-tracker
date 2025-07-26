@@ -2,41 +2,67 @@
 import puppeteer from 'puppeteer';
 import type { Browser, Page } from 'puppeteer';
 
-// Vercel-compatible Chromium for serverless environments
+// Enhanced serverless environment detection and Chromium handling
 let chromium: any = null;
-let isVercelEnvironment = false;
+let isServerlessEnvironment = false;
 
-// Better Vercel environment detection
-const detectVercelEnvironment = () => {
-  // Check multiple Vercel-specific environment variables
-  return !!(
-    process.env.VERCEL ||
-    process.env.VERCEL_ENV ||
-    process.env.NEXT_PUBLIC_VERCEL_ENV ||
-    process.env.VERCEL_URL ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME || // Vercel uses AWS Lambda
-    (process.env.NODE_ENV === 'production' && process.env.LAMBDA_TASK_ROOT)
-  );
-};
-
-try {
-  isVercelEnvironment = detectVercelEnvironment();
-  console.log(`🔍 Environment detection: isVercel=${isVercelEnvironment}, NODE_ENV=${process.env.NODE_ENV}`);
+// Robust serverless environment detection
+function detectServerlessEnvironment() {
+  // Multiple ways to detect serverless/Vercel environment
+  const serverlessIndicators = [
+    process.env.VERCEL,
+    process.env.VERCEL_ENV,
+    process.env.NEXT_PUBLIC_VERCEL_ENV,
+    process.env.VERCEL_URL,
+    process.env.AWS_LAMBDA_FUNCTION_NAME,
+    process.env.AWS_EXECUTION_ENV,
+    process.env.LAMBDA_TASK_ROOT,
+    process.env.AWS_LAMBDA_RUNTIME_API,
+    // Additional checks for serverless environments
+    process.cwd().includes('/var/task'),
+    process.cwd().includes('/tmp'),
+    typeof process.env.HOME !== 'undefined' && process.env.HOME.includes('sbx_user')
+  ];
   
-  if (isVercelEnvironment) {
+  const isServerless = serverlessIndicators.some(indicator => indicator);
+  
+  // Also check if we're in production and likely serverless
+  const isProductionServerless = process.env.NODE_ENV === 'production' && 
+    (process.platform === 'linux' && !process.env.CI);
+  
+  return isServerless || isProductionServerless;
+}
+
+// Initialize environment detection and chromium
+try {
+  isServerlessEnvironment = detectServerlessEnvironment();
+  
+  console.log('🔍 Environment Analysis:');
+  console.log(`  - NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log(`  - Platform: ${process.platform}`);
+  console.log(`  - CWD: ${process.cwd()}`);
+  console.log(`  - VERCEL: ${process.env.VERCEL}`);
+  console.log(`  - AWS_LAMBDA_FUNCTION_NAME: ${process.env.AWS_LAMBDA_FUNCTION_NAME}`);
+  console.log(`  - LAMBDA_TASK_ROOT: ${process.env.LAMBDA_TASK_ROOT}`);
+  console.log(`  - Detected serverless: ${isServerlessEnvironment}`);
+  
+  if (isServerlessEnvironment) {
     chromium = require('@sparticuz/chromium');
-    console.log('🌐 Using @sparticuz/chromium for Vercel serverless environment');
+    console.log('🌐 Loaded @sparticuz/chromium for serverless environment');
+    
+    // Test chromium functionality
+    chromium.executablePath().then((path: string) => {
+      console.log(`✅ Chromium executable path: ${path}`);
+    }).catch((error: any) => {
+      console.error('❌ Failed to get chromium executable path:', error);
+    });
   } else {
     console.log('🔧 Using regular puppeteer for local development');
   }
 } catch (error) {
-  console.log('⚠️ @sparticuz/chromium not available, using regular puppeteer:', error);
-  isVercelEnvironment = false;
+  console.error('⚠️ Error during environment setup:', error);
+  isServerlessEnvironment = false;
 }
-
-// Temporarily disabled stealth plugin for testing
-// This version uses regular puppeteer without stealth features
-console.log('🔧 Using regular puppeteer without stealth plugin for testing');
 
 // Browser pool voor hergebruik
 class BrowserPool {
@@ -71,42 +97,70 @@ class BrowserPool {
     this.isInitializing = true;
     try {
       console.log('🔧 Creating new browser instance...');
+      console.log(`🌍 Environment: ${isServerlessEnvironment ? 'Serverless' : 'Local'}`);
       
-      let launchOptions: any = {
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding'
-        ]
-      };
+      // Base launch options for all environments
+      const baseArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-extensions'
+      ];
 
-      // Use Vercel-compatible Chromium if available
-      if (isVercelEnvironment && chromium) {
+      if (isServerlessEnvironment && chromium) {
+        // Serverless environment - use @sparticuz/chromium
         try {
-          launchOptions.executablePath = await chromium.executablePath();
-          launchOptions.args = chromium.args.concat(launchOptions.args);
-          console.log('🌐 Using Vercel-compatible Chromium executable');
+          console.log('🌐 Setting up serverless Chromium...');
           
-          // In Vercel, use puppeteer-core with custom executable
+          const executablePath = await chromium.executablePath();
+          console.log(`📍 Chromium executable: ${executablePath}`);
+          
+          const chromiumArgs = chromium.args || [];
+          const allArgs = [...chromiumArgs, ...baseArgs];
+          
+          const launchOptions = {
+            args: allArgs,
+            executablePath: executablePath,
+            headless: true,
+            ignoreDefaultArgs: false
+          };
+          
+          console.log('🚀 Launching with puppeteer-core and custom Chromium...');
           const puppeteerCore = require('puppeteer-core');
           this.browser = await puppeteerCore.launch(launchOptions);
+          
+          console.log('✅ Serverless browser launched successfully!');
+          
         } catch (chromiumError) {
-          console.error('❌ Failed to use @sparticuz/chromium, falling back to regular puppeteer:', chromiumError);
-          // Fallback to regular puppeteer
-          this.browser = await puppeteer.launch(launchOptions);
+          console.error('❌ Serverless Chromium setup failed:', chromiumError);
+          console.log('🔄 Falling back to regular puppeteer (this will likely fail in serverless)...');
+          
+          // Fallback attempt (will likely fail in serverless)
+          this.browser = await puppeteer.launch({
+            headless: true,
+            args: baseArgs
+          });
         }
       } else {
+        // Local environment - use regular puppeteer
+        console.log('🔧 Setting up local Puppeteer...');
+        
+        const launchOptions = {
+          headless: true,
+          args: baseArgs
+        };
+        
         this.browser = await puppeteer.launch(launchOptions);
+        console.log('✅ Local browser launched successfully!');
       }
       
       // Auto cleanup na inactiviteit
