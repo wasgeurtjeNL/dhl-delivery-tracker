@@ -4,5 +4,15 @@
       "path": "/api/cron/refresh-trackings",
       "schedule": "* * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "pages/api/admin/test.js": {
+      "includeFiles": "node_modules/puppeteer-extra-plugin-stealth/**"
+    }
+  },
+  "build": {
+    "env": {
+      "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true"
+    }
+  }
 } 
