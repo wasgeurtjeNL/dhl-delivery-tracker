@@ -246,36 +246,68 @@ export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult
     // Direct naar tracking pagina (zoals originele script)
     const url = `https://www.dhl.com/nl-nl/home/traceren.html?tracking-id=${trackingCode}&submit=1`;
     console.log(`🌐 Navigating to: ${url}`);
-    
     await page.goto(url, { 
-      waitUntil: 'domcontentloaded',
-      timeout: 30000 
+      waitUntil: 'networkidle0',
+      timeout: isProductionEnvironment ? 60000 : 30000  // 60s voor Vercel, 30s lokaal
     });
-    
-    // Wacht tot status element geladen is (gebaseerd op mijn verificatie)
-    console.log(`⏳ Waiting for tracking content...`);
-    const statusLoaded = await page.evaluate(async () => {
-      const maxWait = 10000;
-      const start = Date.now();
-      
-      while (Date.now() - start < maxWait) {
-        // Zoek naar status elementen die ik heb geverifieerd
-        if (document.querySelector('.c-tracking-result--status') || 
-            document.querySelector('h2') || 
-            document.querySelector('[class*="status"]')) {
-          return true;
-        }
-        await new Promise(r => setTimeout(r, 200));
+
+    // 📸 DEBUG: Take screenshot after navigation
+    if (isProductionEnvironment) {
+      try {
+        const screenshot1 = await page.screenshot({ encoding: 'base64' });
+        console.log(`📸 Screenshot after navigation (${screenshot1.length} chars): data:image/png;base64,${screenshot1.substring(0, 100)}...`);
+      } catch (err) {
+        console.log(`❌ Screenshot failed: ${err}`);
       }
-      return false;
+    }
+
+    // 🔍 DEBUG: Page analysis after navigation  
+    const pageInfo = await page.evaluate(() => {
+      return {
+        url: window.location.href,
+        title: document.title,
+        bodyLength: document.body.innerHTML.length,
+        hasTrackingContent: document.body.innerText.includes('3SDFC0681190456'),
+        visibleText: document.body.innerText.substring(0, 500),
+        trackingElements: document.querySelectorAll('[class*="tracking"]').length,
+        resultElements: document.querySelectorAll('[class*="result"]').length,
+        statusElements: document.querySelectorAll('[class*="status"]').length,
+        h2Count: document.querySelectorAll('h2').length,
+        buttonCount: document.querySelectorAll('button').length
+      };
     });
     
-    if (!statusLoaded) {
-      throw new Error('Tracking info niet geladen binnen 10 seconden');
-    }
+    console.log(`🔍 Page Analysis:`, JSON.stringify(pageInfo, null, 2));
+
+    console.log(`⏳ Waiting for tracking content...`);
     
-    // Expand secties (exact zoals originele script)
+    try {
+      // Wacht op content met meerdere strategieën - langere timeouts voor Vercel
+      const selectorTimeout = isProductionEnvironment ? 25000 : 15000;
+      const fallbackTimeout = isProductionEnvironment ? 15000 : 8000;
+      
+      await Promise.race([
+        page.waitForSelector('.c-tracking-result--status', { timeout: selectorTimeout }),
+        page.waitForSelector('[class*="tracking"]', { timeout: selectorTimeout }),
+        page.waitForSelector('h2', { timeout: selectorTimeout }),
+        new Promise(resolve => setTimeout(resolve, fallbackTimeout)) // Fallback timeout
+      ]);
+    } catch (e) {
+      console.log(`⚠️ No specific elements found, continuing...`);
+    }
+
+    // 📸 DEBUG: Take screenshot after waiting
+    if (isProductionEnvironment) {
+      try {
+        const screenshot2 = await page.screenshot({ encoding: 'base64' });
+        console.log(`📸 Screenshot after waiting (${screenshot2.length} chars): data:image/png;base64,${screenshot2.substring(0, 100)}...`);
+      } catch (err) {
+        console.log(`❌ Screenshot 2 failed: ${err}`);
+      }
+    }
+
     console.log(`📖 Expanding sections...`);
+    
     await page.evaluate(() => {
       // Expand "Meer details" buttons
       document.querySelectorAll('button').forEach(btn => {
@@ -295,8 +327,41 @@ export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult
       return "Sections expanded";
     });
     
-    // Wacht voor animaties
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wacht voor animaties - langer op Vercel
+    const animationWait = isProductionEnvironment ? 5000 : 2000;
+    await new Promise(resolve => setTimeout(resolve, animationWait));
+
+    // 📸 DEBUG: Final screenshot after expanding
+    if (isProductionEnvironment) {
+      try {
+        const screenshot3 = await page.screenshot({ encoding: 'base64' });
+        console.log(`📸 Final screenshot (${screenshot3.length} chars): data:image/png;base64,${screenshot3.substring(0, 100)}...`);
+      } catch (err) {
+        console.log(`❌ Screenshot 3 failed: ${err}`);
+      }
+    }
+
+    // 🔍 DEBUG: Final page analysis
+    const finalPageInfo = await page.evaluate(() => {
+      const allH2s = Array.from(document.querySelectorAll('h2')).map(h2 => h2.textContent?.trim());
+      const allButtons = Array.from(document.querySelectorAll('button')).map(btn => btn.textContent?.trim()).filter(Boolean);
+      
+      return {
+        bodyLength: document.body.innerHTML.length,
+        h2Texts: allH2s,
+        buttonTexts: allButtons.slice(0, 10), // First 10 buttons
+        statusSelectors: {
+          'c-tracking-result--status h2': document.querySelectorAll('.c-tracking-result--status h2').length,
+          'h2[class*="status"]': document.querySelectorAll('h2[class*="status"]').length,
+          'h2[class*="result"]': document.querySelectorAll('h2[class*="result"]').length,
+          '[class*="tracking"] h2': document.querySelectorAll('[class*="tracking"] h2').length,
+          'status h2': document.querySelectorAll('.status h2').length
+        },
+        sampleHTML: document.body.innerHTML.substring(0, 1000)
+      };
+    });
+    
+    console.log(`🔍 Final Page Analysis:`, JSON.stringify(finalPageInfo, null, 2));
     
     // ULTRA VERBETERDE DOM Extractie met meerdere strategieën
     const trackingData = await page.evaluate((code) => {
