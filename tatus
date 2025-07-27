@@ -1,3 +1,0 @@
-[33m1737104[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Integrate chrome-aws-lambda solution: downgrade puppeteer-core to v6, add chrome-aws-lambda, update scrapeDHL.ts with proven serverless approach
-[33mf3539a8[m Add forum-based Puppeteer fixes: next.config.js + chromium tar URL
-[33m6a7eefb[m Fix Chrome not found error in Vercel: remove top-level await for chromium executable path
