@@ -1,19 +1,12 @@
 // lib/scrapeDHL.ts - ULTRA GEOPTIMALISEERDE VERSIE V2
-import type { Browser, Page } from 'puppeteer';
+import puppeteer, { type Browser } from 'puppeteer';
+import puppeteerCore, { type Browser as BrowserCore } from 'puppeteer-core';
+import chromium from '@sparticuz/chromium-min';
 
-// Proven working serverless setup based on Puppeteer-Vercel implementation
-let chrome: any = {};
-let puppeteer: any;
+// Environment detection based on production deployment
+const isProductionEnvironment = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
 
-// Environment detection based on AWS Lambda (which Vercel uses internally)
-if (process.env.AWS_LAMBDA_FUNCTION_VERSION) {
-  chrome = require('chrome-aws-lambda');
-  puppeteer = require('puppeteer-core');
-  console.log('🌐 Using chrome-aws-lambda for serverless environment');
-} else {
-  puppeteer = require('puppeteer');
-  console.log('🔧 Using regular puppeteer for local development');
-}
+console.log(`🌍 Environment: ${isProductionEnvironment ? 'Production (Vercel)' : 'Development'}`);
 
 // Simple debug logging 
 console.log('🔍 Environment Analysis:');
@@ -29,10 +22,11 @@ console.log(`🔍 Serverless Environment Detected: ${isServerlessEnvironment}`);
 // Browser pool voor hergebruik
 class BrowserPool {
   private static instance: BrowserPool;
-  private browser: Browser | null = null;
+  private browser: Browser | BrowserCore | null = null;
   private isInitializing = false;
   private lastUsed = Date.now();
   private readonly TIMEOUT = 60000; // 1 minuut timeout
+  private initPromise: Promise<Browser | BrowserCore> | null = null;
 
   static getInstance(): BrowserPool {
     if (!BrowserPool.instance) {
@@ -41,83 +35,72 @@ class BrowserPool {
     return BrowserPool.instance;
   }
 
-  async getBrowser(): Promise<Browser> {
+  async getBrowser(): Promise<Browser | BrowserCore> {
     this.lastUsed = Date.now();
     
     if (this.browser && this.browser.connected) {
       return this.browser;
     }
 
-    if (this.isInitializing) {
-      // Wacht tot initialisatie klaar is
-      while (this.isInitializing) {
-        await new Promise(r => setTimeout(r, 100));
-      }
-      return this.browser!;
+    if (this.initPromise) {
+      return this.initPromise;
     }
 
-    this.isInitializing = true;
-    try {
-      console.log('🔧 Creating new browser instance...');
-      console.log(`🌍 Environment: ${isServerlessEnvironment ? 'Serverless' : 'Local'}`);
-      
-      // Base launch options for all environments
-      const baseArgs = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-extensions'
-      ];
-
-      // Browser launch options based on environment
-      let launchOptions: any = {};
-
-      if (isServerlessEnvironment) {
-        // Serverless environment - use chrome-aws-lambda approach
-        console.log('🌐 Setting up chrome-aws-lambda for serverless...');
-        
-        launchOptions = {
-          args: [...chrome.args, ...baseArgs],
-          defaultViewport: chrome.defaultViewport,
-          executablePath: await chrome.executablePath,
-          headless: true,
-          ignoreHTTPSErrors: true,
-        };
-        
-        console.log('🚀 Launching puppeteer-core with chrome-aws-lambda');
-        this.browser = await puppeteer.launch(launchOptions);
-        console.log('✅ Serverless browser launched successfully!');
-        
-      } else {
-        // Local environment - use regular puppeteer
-        console.log('🔧 Setting up local Puppeteer...');
-        
-        launchOptions = {
-          headless: true,
-          args: baseArgs
-        };
-        
-        this.browser = await puppeteer.launch(launchOptions);
-        console.log('✅ Local browser launched successfully!');
-      }
-      
-      // Auto cleanup na inactiviteit
-      setTimeout(() => this.cleanup(), this.TIMEOUT);
-      
-    } finally {
-      this.isInitializing = false;
-    }
+    this.initPromise = this.initializeBrowser();
+    this.browser = await this.initPromise;
+    this.initPromise = null;
     
-    return this.browser!;
+    return this.browser;
+  }
+
+  private async initializeBrowser(): Promise<Browser | BrowserCore> {
+    const baseArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding'
+    ];
+
+    let browser: Browser | BrowserCore;
+
+         if (isProductionEnvironment) {
+       // Production environment - use @sparticuz/chromium-min approach
+       console.log('🌐 Setting up chromium-min for serverless environment...');
+       
+       // Configure the chromium version (v133.0.0 for latest compatibility)
+       const executablePath = await chromium.executablePath('https://github.com/Sparticuz/chromium/releases/download/v133.0.0/chromium-v133.0.0-pack.tar');
+       
+               console.log('🚀 Launching puppeteer-core with chromium-min');
+        browser = await puppeteerCore.launch({
+          executablePath,
+          args: [...chromium.args, ...baseArgs],
+          headless: true,
+          defaultViewport: { width: 1280, height: 720 },
+        });
+       console.log('✅ Serverless browser launched successfully!');
+     } else {
+       // Local environment - use regular puppeteer
+       console.log('🔧 Setting up local Puppeteer...');
+       browser = await puppeteer.launch({
+         headless: true,
+         args: baseArgs
+       });
+       console.log('✅ Local browser launched successfully!');
+     }
+
+    // Set up browser event handlers
+    browser.on('disconnected', () => {
+      console.log('🔌 Browser disconnected');
+      this.browser = null;
+    });
+
+    return browser;
   }
 
   private async cleanup() {
@@ -240,7 +223,7 @@ export function parseNLDate(dateStr: string): Date | null {
 
 export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult> {
   const startTime = Date.now();
-  let page: Page | null = null;
+  let page: any | null = null;
   
   try {
     console.log(`🚀 DHL Scraping start: ${trackingCode}`);
