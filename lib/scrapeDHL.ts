@@ -316,7 +316,7 @@ export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult
         const alternatives = [
           'h2[class*="status"]', 'h2[class*="result"]', 
           '.status h2', '.result h2', '.tracking-status h2',
-          'h2:contains("Bezorgd")', 'h2:contains("Onderweg")', 'h2:contains("Verwerkt")'
+          '[class*="tracking"] h2', '[class*="delivery"] h2'
         ];
         
         for (const selector of alternatives) {
