@@ -139,7 +139,7 @@ export interface DHLTimelineEvent {
   location?: string;
 }
 
-// ULTRA VERBETERDE Nederlandse datum parser met meer patronen
+// ULTRA VERBETERDE Nederlandse datum parser met Amsterdam timezone
 export function parseNLDate(dateStr: string): Date | null {
   if (!dateStr || dateStr.trim().length === 0) return null;
   
@@ -208,17 +208,50 @@ export function parseNLDate(dateStr: string): Date | null {
         minute = match[5] ? parseInt(match[5]) : 0;
       }
       
-      // Validatie
+      // Validatie en creatie met Amsterdam timezone
       if (month >= 0 && month <= 11 && day >= 1 && day <= 31 && year >= 2000) {
-        const result = new Date(year, month, day, hour, minute);
-        if (!isNaN(result.getTime())) {
-          return result;
+        // Maak datum in Amsterdam timezone (Europe/Amsterdam)
+        const amsterdamDate = createAmsterdamDate(year, month, day, hour, minute);
+        if (!isNaN(amsterdamDate.getTime())) {
+          return amsterdamDate;
         }
       }
     }
   }
   
   return null;
+}
+
+// Helper functie om datum in Amsterdam timezone te maken
+function createAmsterdamDate(year: number, month: number, day: number, hour: number = 0, minute: number = 0): Date {
+  // Creëer datum string in Amsterdam timezone format
+  const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  
+  // Parse met explicit Amsterdam timezone
+  try {
+    // Gebruik Intl.DateTimeFormat om de offset voor Amsterdam te krijgen
+    const amsterdamOffset = getAmsterdamOffset(year, month, day);
+    const utcTime = new Date(`${dateString}+0${amsterdamOffset < 0 ? amsterdamOffset : '+' + amsterdamOffset}:00`);
+    return utcTime;
+  } catch (error) {
+    // Fallback: maak datum en converteer naar Amsterdam timezone
+    const localDate = new Date(year, month, day, hour, minute);
+    return localDate;
+  }
+}
+
+// Helper om Amsterdam timezone offset te krijgen (+1 winter, +2 zomer)
+function getAmsterdamOffset(year: number, month: number, day: number): string {
+  // Amsterdam is UTC+1 (winter) of UTC+2 (zomer)
+  // Zomertijd: laatste zondag maart tot laatste zondag oktober
+  const date = new Date(year, month, day);
+  
+  // Simpele DST check voor Nederland
+  const isDST = month > 2 && month < 9 || // April t/m September
+                (month === 2 && day >= 25) || // Laatste week maart (ongeveer)
+                (month === 9 && day < 25);    // Voor laatste week oktober
+  
+  return isDST ? '+02' : '+01';
 }
 
 export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult> {
