@@ -224,34 +224,18 @@ export function parseNLDate(dateStr: string): Date | null {
 
 // Helper functie om datum in Amsterdam timezone te maken
 function createAmsterdamDate(year: number, month: number, day: number, hour: number = 0, minute: number = 0): Date {
-  // Creëer datum string in Amsterdam timezone format
-  const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  // Simpele benadering: maak datum en force naar Nederlandse timezone
+  // Door altijd CET/CEST offset te gebruiken krijgen we consistente resultaten
+  const baseDate = new Date(year, month, day, hour, minute);
   
-  // Parse met explicit Amsterdam timezone
-  try {
-    // Gebruik Intl.DateTimeFormat om de offset voor Amsterdam te krijgen
-    const amsterdamOffset = getAmsterdamOffset(year, month, day);
-    const utcTime = new Date(`${dateString}+0${amsterdamOffset < 0 ? amsterdamOffset : '+' + amsterdamOffset}:00`);
-    return utcTime;
-  } catch (error) {
-    // Fallback: maak datum en converteer naar Amsterdam timezone
-    const localDate = new Date(year, month, day, hour, minute);
-    return localDate;
-  }
-}
-
-// Helper om Amsterdam timezone offset te krijgen (+1 winter, +2 zomer)
-function getAmsterdamOffset(year: number, month: number, day: number): string {
-  // Amsterdam is UTC+1 (winter) of UTC+2 (zomer)
-  // Zomertijd: laatste zondag maart tot laatste zondag oktober
-  const date = new Date(year, month, day);
+  // Amsterdam is UTC+1 (winter) of UTC+2 (zomer) 
+  // Voor consistentie tussen Vercel en localhost gebruiken we vaste offset
+  const isWinter = month < 2 || month > 9 || (month === 2 && day < 25) || (month === 9 && day >= 25);
+  const offsetHours = isWinter ? 1 : 2; // CET = +1, CEST = +2
   
-  // Simpele DST check voor Nederland
-  const isDST = month > 2 && month < 9 || // April t/m September
-                (month === 2 && day >= 25) || // Laatste week maart (ongeveer)
-                (month === 9 && day < 25);    // Voor laatste week oktober
-  
-  return isDST ? '+02' : '+01';
+  // Converteer naar UTC en trek Amsterdam offset eraf om juiste lokale tijd te krijgen
+  const utcTime = baseDate.getTime() - (offsetHours * 60 * 60 * 1000);
+  return new Date(utcTime);
 }
 
 export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult> {
