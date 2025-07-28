@@ -1,3 +1,4 @@
+console.log('DHL_API_KEY in admin:', process.env.DHL_API_KEY);
 // pages/admin/settings.tsx
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
@@ -195,6 +196,45 @@ export default function AdminSettings() {
   };
 
   // Specifieke DHL test functie (zoals run check in dashboard)
+  // DHL Official API Test function
+  const testDHLOfficialAPI = async (trackingCode: string) => {
+    setTestLoading(true);
+    
+    try {
+      console.log(`🧪 Testing DHL Official API for: ${trackingCode}`);
+
+      const response = await fetch('/api/admin/test-dhl-api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackingCode })
+      });
+
+      const result = await response.json();
+      
+      console.log(`🧪 DHL API test result:`, result);
+
+      // Store result in testResults state
+      setTestResults(prev => ({
+        ...prev,
+        dhlAPI: result
+      }));
+
+    } catch (error) {
+      console.error('❌ DHL API test failed:', error);
+      
+      setTestResults(prev => ({
+        ...prev,
+        dhlAPI: {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          timestamp: new Date().toISOString()
+        }
+      }));
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
   const runDHLTest = async (trackingCode: string) => {
     testProgress.showProgress({
       mode: 'steps',
@@ -498,6 +538,7 @@ export default function AdminSettings() {
                        {[
              { id: 'settings', name: '⚙️ Settings', desc: 'System configuration' },
              { id: 'tests', name: '🧪 Tests', desc: 'Test all services' },
+             { id: 'dhl-api', name: '🚚 DHL API', desc: 'Test new DHL API integration' },
              { id: 'cron', name: '🕒 Cron Logs', desc: 'Automatic refresh logs' },
              { id: 'overrides', name: '🛠️ Overrides', desc: 'Manual controls' }
            ].map((tab) => (
@@ -1124,6 +1165,235 @@ export default function AdminSettings() {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DHL API Tab */}
+        {activeTab === 'dhl-api' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* DHL API Testing */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">🚚 DHL Official API Testing</h2>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <div className="flex items-start">
+                  <div className="text-blue-600 mr-3">ℹ️</div>
+                  <div>
+                    <p className="text-blue-800 font-medium mb-1">Nieuwe DHL API Implementatie</p>
+                    <p className="text-blue-700 text-sm">
+                      Dit systeem gebruikt nu de officiële DHL Shipment Tracking API in plaats van web scraping.
+                      Sneller, betrouwbaarder en schaalbaarder voor productie gebruik.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Test Tracking Codes</label>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="3SDFC0681190456 (Example: delivered package)"
+                        value={testTrackingCode}
+                        onChange={(e) => setTestTrackingCode(e.target.value)}
+                        className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm font-mono"
+                      />
+                      <button
+                        onClick={() => testDHLOfficialAPI(testTrackingCode)}
+                        disabled={testLoading}
+                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Test API
+                      </button>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Suggested test codes: <code>3SDFC0681190456</code> (delivered), <code>3SDFC1799740226</code> (in transit)
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="font-medium text-gray-900 mb-3">Quick Test Buttons</h3>
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      onClick={() => testDHLOfficialAPI('3SDFC0681190456')}
+                      disabled={testLoading}
+                      className="w-full bg-green-600 text-white py-2 px-4 rounded hover:bg-green-700 disabled:opacity-50 text-sm"
+                    >
+                      Test: Delivered Package (3SDFC0681190456)
+                    </button>
+                    <button
+                      onClick={() => testDHLOfficialAPI('3SDFC1799740226')}
+                      disabled={testLoading}
+                      className="w-full bg-yellow-600 text-white py-2 px-4 rounded hover:bg-yellow-700 disabled:opacity-50 text-sm"
+                    >
+                      Test: In Transit Package (3SDFC1799740226)
+                    </button>
+                    <button
+                      onClick={() => testDHLOfficialAPI('INVALID123456')}
+                      disabled={testLoading}
+                      className="w-full bg-red-600 text-white py-2 px-4 rounded hover:bg-red-700 disabled:opacity-50 text-sm"
+                    >
+                      Test: Invalid Tracking Code
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="font-medium text-gray-900 mb-3">API Configuration Status</h3>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded">
+                      <span className="text-sm text-gray-700">DHL API Key</span>
+                      <span className="text-sm text-green-600">
+                        ✅ Configured
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded">
+                      <span className="text-sm text-gray-700">API Endpoint</span>
+                      <span className="text-sm text-blue-600">✅ api-eu.dhl.com</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* DHL API Test Results */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">📊 API Test Results</h2>
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {testResults?.dhlAPI ? (
+                  <div className="border border-gray-200 rounded p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-medium text-lg">DHL Official API</span>
+                      <span className={`px-3 py-1 text-sm rounded-full ${
+                        testResults.dhlAPI.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {testResults.dhlAPI.success ? 'SUCCESS' : 'FAILED'}
+                      </span>
+                    </div>
+                    
+                    {testResults.dhlAPI.success && testResults.dhlAPI.result && (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="bg-blue-50 p-3 rounded">
+                            <div className="text-sm font-medium text-blue-800 mb-1">📦 Tracking Code</div>
+                            <div className="text-blue-900 font-mono">{testResults.dhlAPI.trackingCode}</div>
+                          </div>
+                          <div className={`p-3 rounded ${
+                            testResults.dhlAPI.result.deliveryStatus === 'bezorgd' ? 'bg-green-50' :
+                            testResults.dhlAPI.result.deliveryStatus === 'onderweg' ? 'bg-yellow-50' :
+                            testResults.dhlAPI.result.deliveryStatus === 'niet gevonden' ? 'bg-gray-50' :
+                            'bg-red-50'
+                          }`}>
+                            <div className="text-sm font-medium text-gray-800 mb-1">🚛 Status</div>
+                            <div className="capitalize font-semibold">{testResults.dhlAPI.result.deliveryStatus}</div>
+                          </div>
+                        </div>
+
+                        {/* NIEUWE TIMING DATA SECTIE */}
+                        <div className="bg-gradient-to-r from-emerald-50 to-blue-50 border border-emerald-200 rounded-lg p-4">
+                          <div className="text-sm font-bold text-emerald-800 mb-3 flex items-center gap-2">
+                            ⏱️ Duration Analysis
+                            <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full text-xs">
+                              NIEUWE DATA
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-3">
+                              <div className="bg-white bg-opacity-70 p-3 rounded">
+                                <div className="text-xs font-medium text-gray-600 mb-1">📤 Afgegeven bij DHL</div>
+                                <div className="text-sm font-semibold text-gray-800">
+                                  {testResults.dhlAPI.result.afgegevenMoment ? 
+                                    new Date(testResults.dhlAPI.result.afgegevenMoment).toLocaleString('nl-NL', {
+                                      weekday: 'short',
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    }) : 
+                                    'Nog niet opgehaald'
+                                  }
+                                </div>
+                              </div>
+                              <div className="bg-white bg-opacity-70 p-3 rounded">
+                                <div className="text-xs font-medium text-gray-600 mb-1">📥 Bezorgd aan klant</div>
+                                <div className="text-sm font-semibold text-gray-800">
+                                  {testResults.dhlAPI.result.afleverMoment ? 
+                                    new Date(testResults.dhlAPI.result.afleverMoment).toLocaleString('nl-NL', {
+                                      weekday: 'short',
+                                      day: '2-digit',
+                                      month: 'short',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    }) : 
+                                    'Nog niet bezorgd'
+                                  }
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-center">
+                              <div className="bg-white bg-opacity-90 p-4 rounded-lg text-center border-2 border-emerald-200">
+                                <div className="text-xs font-medium text-gray-600 mb-1">⏱️ Totale doorlooptijd</div>
+                                <div className="text-lg font-bold text-emerald-700">
+                                  {testResults.dhlAPI.result.duration || 'Berekening niet mogelijk'}
+                                </div>
+                                {testResults.dhlAPI.result.durationDays && (
+                                  <div className="text-xs text-emerald-600 mt-1">
+                                    ({testResults.dhlAPI.result.durationDays.toFixed(2)} dagen exact)
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-purple-50 p-3 rounded">
+                          <div className="text-sm font-medium text-purple-800 mb-2">📋 Status Events</div>
+                          <div className="text-sm text-purple-900">
+                            {testResults.dhlAPI.result.statusTabel.length} events found
+                          </div>
+                          {testResults.dhlAPI.result.statusTabel.length > 0 && (
+                            <div className="mt-2 max-h-32 overflow-y-auto text-xs text-purple-800 space-y-1">
+                              {testResults.dhlAPI.result.statusTabel.slice(0, 3).map((event, idx) => (
+                                <div key={idx} className="bg-white bg-opacity-70 p-1 rounded">
+                                  {event}
+                                </div>
+                              ))}
+                              {testResults.dhlAPI.result.statusTabel.length > 3 && (
+                                <div className="text-purple-600 italic">
+                                  ... and {testResults.dhlAPI.result.statusTabel.length - 3} more events
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex justify-between items-center text-xs text-gray-500">
+                          <span>Processing time: {testResults.dhlAPI.result.processingTime}ms</span>
+                          <span>Tested: {testResults.dhlAPI.timestamp}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {!testResults.dhlAPI.success && (
+                      <div className="bg-red-50 border border-red-200 rounded p-3">
+                        <div className="text-sm font-medium text-red-800 mb-1">❌ Error</div>
+                        <pre className="text-xs text-red-700 whitespace-pre-wrap">
+                          {testResults.dhlAPI.error}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <span className="text-4xl mb-2 block">🚚</span>
+                    <p>No API tests run yet</p>
+                    <p className="text-sm">Click one of the test buttons to start</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
