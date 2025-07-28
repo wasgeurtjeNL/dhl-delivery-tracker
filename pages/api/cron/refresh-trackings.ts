@@ -14,18 +14,23 @@ let MAX_TRACKINGS_PER_RUN = 20;
 let DELAY_BETWEEN_SCRAPES = 3000; // 3 seconds between scrapes
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Only allow POST method
-  if (req.method !== 'POST') {
+  // Allow both GET and POST methods for Vercel Cron compatibility
+  if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Check if this is a valid cron request (can be called by Vercel Cron or external service)
+    // Check if this is a valid cron request
     const authHeader = req.headers.authorization;
     const cronSecret = process.env.CRON_SECRET || 'your-secret-key';
     
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    // For Vercel Cron jobs, we can skip auth header requirement or use a query param
+    const isVercelCron = req.headers['user-agent']?.includes('vercel-cron') || 
+                        req.query.secret === cronSecret ||
+                        authHeader === `Bearer ${cronSecret}`;
+    
+    if (!isVercelCron) {
+      return res.status(401).json({ error: 'Unauthorized - Invalid cron secret' });
     }
 
     const cronStartTime = new Date();
