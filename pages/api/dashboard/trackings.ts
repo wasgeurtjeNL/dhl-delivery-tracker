@@ -87,20 +87,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       throw error;
     }
 
+    // Functie voor gebruiksvriendelijke tijd weergave
+    const formatTimeUnderweg = (startMoment: Date, endMoment: Date): string => {
+      const totalMinutes = Math.floor((endMoment.getTime() - startMoment.getTime()) / (1000 * 60));
+      const totalHours = Math.floor(totalMinutes / 60);
+      const totalDays = Math.floor(totalHours / 24);
+      
+      if (totalHours < 6) {
+        return `${totalHours} uur onderweg`;
+      } else if (totalHours < 24) {
+        return `${totalHours} uur onderweg`;
+      } else if (totalDays <= 2) {
+        const remainingHours = totalHours % 24;
+        if (remainingHours === 0) {
+          return `${totalDays} ${totalDays === 1 ? 'dag' : 'dagen'} onderweg`;
+        } else {
+          return `${totalDays} ${totalDays === 1 ? 'dag' : 'dagen'} ${remainingHours} uur onderweg`;
+        }
+      } else {
+        return `${totalDays} dagen onderweg`;
+      }
+    };
+
     // Voor elke tracking, haal de laatste logs op en bereken informatie
     const enrichedTrackings = await Promise.all(
       trackings?.map(async (tracking, index) => {
         const today = new Date();
         const verzendMoment = new Date(tracking.created_at);
-        const dagenOnderweg = differenceInCalendarDays(today, verzendMoment);
-
-        // Haal laatste logs op voor deze tracking
+        
+        // Haal laatste logs op voor deze tracking (eerst declareren voor gebruik)
         const { data: logs } = await supabase
           .from('tracking_logs')
           .select('action_type, created_at, details')
           .eq('tracking_code', tracking.tracking_code)
           .order('created_at', { ascending: false })
           .limit(5);
+
+        // FIX: Stop met tellen als pakket bezorgd is
+        const packageDelivered = tracking.delivery_status === 'bezorgd' || 
+          logs?.some(log => log.action_type === 'customer_choice' && log.details?.keuze === 'ontvangen');
+        const eindMoment = packageDelivered && tracking.aflever_moment ? 
+          new Date(tracking.aflever_moment) : today;
+        
+        // Nieuwe gebruiksvriendelijke tijd berekening
+        const tijdOnderweg = formatTimeUnderweg(verzendMoment, eindMoment);
+        const dagenOnderwegNumber = Math.floor((eindMoment.getTime() - verzendMoment.getTime()) / (1000 * 60 * 60 * 24));
 
         // OPTIMIZED: Use stored duration information from database - ONLY scrape when explicitly requested
         let dhlInfo = null;
@@ -183,67 +214,103 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           };
         }
 
-        // Bepaal status op basis van logs, dagen onderweg en timing settings
+        // FIX: Bepaal status - PRIORITEIT aan echte DHL status
         let status = 'OK';
         let statusColor = 'green';
         let lastAction = 'Geen actie';
         let needsAction = false;
 
-        if (logs && logs.length > 0) {
-          const latestLog = logs[0];
-          
-          switch (latestLog.action_type) {
-            case 'heads_up_sent':
-              lastAction = `Dag ${timingSettings.day_3_timing} email verzonden`;
-              status = dagenOnderweg >= timingSettings.day_5_timing ? 'Actie nodig' : 'Gemonitord';
-              statusColor = dagenOnderweg >= timingSettings.day_5_timing ? 'orange' : 'blue';
-              needsAction = dagenOnderweg >= timingSettings.day_5_timing;
+        // PRIORITEIT 1: Gebruik echte DHL status als beschikbaar
+        if (dhlInfo && dhlInfo.deliveryStatus && dhlInfo.deliveryStatus !== 'fout') {
+          switch (dhlInfo.deliveryStatus) {
+            case 'bezorgd':
+              status = 'Bezorgd';
+              statusColor = 'green';
+              needsAction = false;
+              lastAction = 'Pakket bezorgd';
               break;
-            case 'choice_sent':
-              lastAction = `Dag ${timingSettings.day_5_timing} keuze email verzonden`;
-              status = 'Wacht op reactie';
+            case 'onderweg':
+              status = 'Onderweg';
               statusColor = 'blue';
-              needsAction = dagenOnderweg >= timingSettings.day_10_timing;
+              needsAction = dagenOnderwegNumber >= timingSettings.day_5_timing;
+              lastAction = 'In transport bij DHL';
               break;
-            case 'gift_notice_sent':
-              lastAction = `Dag ${timingSettings.day_10_timing} compensatie verzonden`;
-              status = 'Afgehandeld';
-              statusColor = 'green';
-              needsAction = false;
+            case 'verwerkt':
+              status = 'Wacht op ophaling';
+              statusColor = 'yellow';
+              needsAction = dagenOnderwegNumber >= timingSettings.day_3_timing;
+              lastAction = 'Wacht op DHL ophaling';
               break;
-            case 'customer_choice':
-              const choice = latestLog.details?.keuze;
-              lastAction = `Klant koos: ${choice}`;
-              status = 'Klant gereageerd';
-              statusColor = 'green';
-              needsAction = false;
-              break;
-            case 'processing_error':
-              lastAction = 'Error';
-              status = 'Fout';
+            case 'niet gevonden':
+              status = 'Niet gevonden';
               statusColor = 'red';
               needsAction = true;
+              lastAction = 'Tracking niet gevonden';
               break;
+            default:
+              status = 'Onbekend';
+              statusColor = 'gray';
+              needsAction = true;
+              lastAction = 'Status onbekend';
           }
         } else {
-          // Geen logs, bepaal op basis van dagen en timing settings
-          if (dagenOnderweg >= timingSettings.day_10_timing) {
-            status = `Actie nodig (Dag ${timingSettings.day_10_timing})`;
-            statusColor = 'red';
-            needsAction = true;
-          } else if (dagenOnderweg >= timingSettings.day_5_timing) {
-            status = `Actie nodig (Dag ${timingSettings.day_5_timing})`;
-            statusColor = 'orange';
-            needsAction = true;
-          } else if (dagenOnderweg >= timingSettings.day_3_timing) {
-            status = `Actie nodig (Dag ${timingSettings.day_3_timing})`;
-            statusColor = 'yellow';
-            needsAction = true;
+          // PRIORITEIT 2: Email/customer action logs
+          if (logs && logs.length > 0) {
+            const latestLog = logs[0];
+            
+            switch (latestLog.action_type) {
+              case 'heads_up_sent':
+                lastAction = `Dag ${timingSettings.day_3_timing} email verzonden`;
+                status = dagenOnderwegNumber >= timingSettings.day_5_timing ? 'Actie nodig' : 'Gemonitord';
+                statusColor = dagenOnderwegNumber >= timingSettings.day_5_timing ? 'orange' : 'blue';
+                needsAction = dagenOnderwegNumber >= timingSettings.day_5_timing;
+                break;
+              case 'choice_sent':
+                lastAction = `Dag ${timingSettings.day_5_timing} keuze email verzonden`;
+                status = 'Wacht op reactie';
+                statusColor = 'blue';
+                needsAction = dagenOnderwegNumber >= timingSettings.day_10_timing;
+                break;
+              case 'gift_notice_sent':
+                lastAction = `Dag ${timingSettings.day_10_timing} compensatie verzonden`;
+                status = 'Afgehandeld';
+                statusColor = 'green';
+                needsAction = false;
+                break;
+              case 'customer_choice':
+                const choice = latestLog.details?.keuze;
+                lastAction = `Klant koos: ${choice}`;
+                status = 'Klant gereageerd';
+                statusColor = 'green';
+                needsAction = false;
+                break;
+              case 'processing_error':
+                lastAction = 'Error';
+                status = 'Fout';
+                statusColor = 'red';
+                needsAction = true;
+                break;
+            }
+          } else {
+            // PRIORITEIT 3: Fallback - geen logs, bepaal op basis van dagen en timing settings
+            if (dagenOnderwegNumber >= timingSettings.day_10_timing) {
+              status = `Actie nodig (Dag ${timingSettings.day_10_timing})`;
+              statusColor = 'red';
+              needsAction = true;
+            } else if (dagenOnderwegNumber >= timingSettings.day_5_timing) {
+              status = `Actie nodig (Dag ${timingSettings.day_5_timing})`;
+              statusColor = 'orange';
+              needsAction = true;
+            } else if (dagenOnderwegNumber >= timingSettings.day_3_timing) {
+              status = `Actie nodig (Dag ${timingSettings.day_3_timing})`;
+              statusColor = 'yellow';
+              needsAction = true;
+            }
           }
         }
 
         // Bepaal of tracking als "afgeleverd" moet worden gemarkeerd
-        const isDelivered = tracking.delivery_status === 'bezorgd' || 
+        const isTrackingComplete = tracking.delivery_status === 'bezorgd' || 
           logs?.some(log => log.action_type === 'customer_choice' && log.details?.keuze === 'ontvangen');
 
         const enrichedTracking = {
@@ -253,13 +320,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           customerName: `${tracking.first_name} ${tracking.last_name}`.trim(),
           email: tracking.email,
           orderId: tracking.order_id,
-          dagenOnderweg,
+          dagenOnderweg: dagenOnderwegNumber,
+          tijdOnderweg,
           status,
           statusColor,
           lastAction,
           verzendDatum: verzendMoment.toLocaleDateString('nl-NL'),
           verzendTime: verzendMoment.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
-          isActive: tracking.is_active && !isDelivered,
+          isActive: tracking.is_active && !isTrackingComplete,
           deliveryStatus: dhlInfo?.deliveryStatus || tracking.delivery_status,
           needsAction,
           logs: logs || [],

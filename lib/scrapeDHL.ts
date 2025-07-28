@@ -276,7 +276,9 @@ export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DH
       const statusCode = event.statusCode?.toLowerCase() || '';
       
       // Keywords voor wanneer DHL het pakket heeft ontvangen/opgehaald
-      if (description.includes('picked up') || 
+      if (description.includes('dropped off at dhl') ||
+          description.includes('shipped at dhl') ||
+          description.includes('picked up') || 
           description.includes('collected') || 
           description.includes('received') || 
           description.includes('processed') ||
@@ -284,6 +286,8 @@ export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DH
           description.includes('opgehaald') ||
           description.includes('verwerkt') ||
           description.includes('in processing') ||
+          description.includes('acceptance') ||
+          description.includes('servicepoint') ||
           statusCode === 'pre-transit' ||
           statusCode === 'processed') {
         if (!afgegevenMoment) {
@@ -300,12 +304,15 @@ export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DH
       const description = event.description.toLowerCase();
       const statusCode = event.statusCode?.toLowerCase() || '';
       
-      // Keywords voor delivery
+      // Keywords voor delivery - gebaseerd op echte DHL API responses
       if (description.includes('delivered') || 
           description.includes('bezorgd') || 
           description.includes('afgeleverd') ||
           description.includes('uitgeleverd') ||
           description.includes('geleverd') ||
+          description.includes('delivered in mailbox') ||
+          description.includes('delivered to') ||
+          description.includes('handed over to customer') ||
           statusCode === 'delivered') {
         afleverMoment = new Date(event.timestamp);
         deliveryStatus = 'bezorgd';

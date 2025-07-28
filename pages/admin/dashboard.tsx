@@ -34,6 +34,7 @@ interface Tracking {
   customerName: string;
   email: string;
   dagenOnderweg: number;
+  tijdOnderweg: string;
   status: string;
   statusColor: string;
   lastAction: string;
@@ -577,17 +578,16 @@ export default function Dashboard() {
                     <td className="px-6 py-5 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <span className={`
-                          inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold
+                          inline-flex items-center px-3 py-1 rounded-full text-sm font-medium
                           ${tracking.dagenOnderweg > 7 
-                            ? 'bg-red-100 text-red-700 border-2 border-red-200' 
+                            ? 'bg-red-100 text-red-700 border border-red-200' 
                             : tracking.dagenOnderweg > 3 
-                            ? 'bg-orange-100 text-orange-700 border-2 border-orange-200' 
-                            : 'bg-green-100 text-green-700 border-2 border-green-200'
+                            ? 'bg-orange-100 text-orange-700 border border-orange-200' 
+                            : 'bg-green-100 text-green-700 border border-green-200'
                           }
                         `}>
-                          {tracking.dagenOnderweg}
+                          {tracking.tijdOnderweg}
                         </span>
-                        <span className="text-xs text-gray-500 font-medium">dagen</span>
                       </div>
                     </td>
                     <td className="px-6 py-5 whitespace-nowrap">
