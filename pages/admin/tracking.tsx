@@ -141,6 +141,7 @@ export default function TrackingDashboard() {
   }, []);
 
   const handlePageChange = (newPage: number) => {
+    setPagination(prev => ({ ...prev, page: newPage })); // Update pagination state directly
     fetchTrackings(newPage, filters, true); // Skip DHL for pagination
   };
 

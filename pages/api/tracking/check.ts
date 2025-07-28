@@ -3,7 +3,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
 import { scrapeDHL } from '@/lib/scrapeDHL';
 import { differenceInCalendarDays } from 'date-fns';
-import { sendMandrillEmail } from '@/lib/sendMandrillMail';
+import { sendSupabaseEmailWithRetry } from '@/lib/sendSupabaseEmailWithRetry';
 import { logTrackingAction } from '@/lib/logTrackingAction';
 
 const supabase = createClient(
@@ -129,11 +129,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const alreadySentHeadsUp = await checkIfAlreadyLogged(tracking_code, 'heads_up_sent');
       
       if (!alreadySentHeadsUp) {
-        await sendMandrillEmail({
+        const emailResult = await sendSupabaseEmailWithRetry({
           to: { email, name: first_name },
-          templateName: settings.email_template_day3,
+          templateType: 'day3_notify',
           mergeVars: { first_name, order_id, tracking_code }
         });
+
+        if (!emailResult.success) {
+          console.error(`❌ Failed to send day ${settings.day_3_timing} email after ${emailResult.attempts} attempts: ${emailResult.final_error}`);
+        }
 
         await logTrackingAction({
           tracking_code,
@@ -154,9 +158,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const alreadySentChoice = await checkIfAlreadyLogged(tracking_code, 'choice_sent');
       
       if (!alreadySentChoice) {
-        await sendMandrillEmail({
+        await sendSupabaseEmail({
           to: { email, name: first_name },
-          templateName: settings.email_template_day5,
+          templateType: 'day5_choice',
           mergeVars: {
             first_name,
             order_id,
@@ -185,9 +189,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const alreadySentGift = await checkIfAlreadyLogged(tracking_code, 'gift_notice_sent');
       
       if (!alreadySentGift) {
-        await sendMandrillEmail({
+        await sendSupabaseEmail({
           to: { email, name: first_name },
-          templateName: settings.email_template_day10,
+          templateType: 'day10_gift_notice',
           mergeVars: { first_name, order_id }
         });
 

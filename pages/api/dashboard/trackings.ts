@@ -410,19 +410,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ? completedTrackings.reduce((sum, t) => sum + (t.dhlInfo?.durationDays || 0), 0) / completedTrackings.length
       : 0;
 
-    // Return alleen de records voor deze pagina (na filtering)
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedTrackings = filteredTrackings.slice(startIndex, endIndex);
-
+    // Database paginering is al toegepast via .range(), geen extra JavaScript paginering nodig
     res.status(200).json({
-      trackings: paginatedTrackings,
+      trackings: filteredTrackings,
       pagination: {
         page,
         limit,
         total: count || 0,
         pages: Math.ceil((count || 0) / limit),
-        showing: paginatedTrackings.length,
+        showing: filteredTrackings.length,
         filteredTotal: filteredTrackings.length
       },
       stats: {

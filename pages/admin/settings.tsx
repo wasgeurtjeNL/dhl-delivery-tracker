@@ -43,6 +43,10 @@ export default function AdminSettings() {
   const [cronLogs, setCronLogs] = useState<any>(null);
   const [cronLogsLoading, setCronLogsLoading] = useState(false);
   
+  // NEW: DHL API Usage state
+  const [dhlApiStats, setDhlApiStats] = useState<any>(null);
+  const [dhlApiStatsLoading, setDhlApiStatsLoading] = useState(false);
+  
   // Progress indicators
   const loadingProgress = useProgress();
   const saveProgress = useProgress();
@@ -68,6 +72,9 @@ export default function AdminSettings() {
   useEffect(() => {
     if (activeTab === 'cron' && !cronLogs) {
       fetchCronLogs();
+    }
+    if (activeTab === 'dhl-api' && !dhlApiStats) {
+      fetchDHLApiStats();
     }
   }, [activeTab]);
 
@@ -195,7 +202,25 @@ export default function AdminSettings() {
     }
   };
 
-  // Specifieke DHL test functie (zoals run check in dashboard)
+  // Fetch DHL API usage statistics
+  const fetchDHLApiStats = async () => {
+    setDhlApiStatsLoading(true);
+    try {
+      const response = await fetch('/api/admin/dhl-api-stats');
+      const data = await response.json();
+      
+      if (response.ok) {
+        setDhlApiStats(data.stats);
+      } else {
+        console.error('Failed to fetch DHL API stats:', data.error);
+      }
+    } catch (error) {
+      console.error('Error fetching DHL API stats:', error);
+    } finally {
+      setDhlApiStatsLoading(false);
+    }
+  };
+
   // DHL Official API Test function
   const testDHLOfficialAPI = async (trackingCode: string) => {
     setTestLoading(true);
@@ -620,8 +645,98 @@ export default function AdminSettings() {
             </div>
 
             {/* Email Templates */}
+                        {/* Environment Status */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">🔧 Environment Status</h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => window.open('/admin/environment-status', '_blank')}
+                    className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 text-sm"
+                  >
+                    🔍 Check Environment
+                  </button>
+                  <button
+                    onClick={() => window.open('/admin/production-readiness', '_blank')}
+                    className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 text-sm"
+                  >
+                    🚀 Production Ready?
+                  </button>
+                </div>
+              </div>
+              <p className="text-gray-600 text-sm">
+                Valideer alle environment variables, API verbindingen en systeem configuraties voor productie-gereedheid.
+              </p>
+            </div>
+
+            {/* Replacement System */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">🛒 Replacement System</h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => window.open('/admin/replacement-analytics', '_blank')}
+                    className="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 text-sm"
+                  >
+                    📊 Analytics
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const response = await fetch('/api/admin/replacement-test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ testType: 'full' })
+                      });
+                      const result = await response.json();
+                      alert(`Test Results: ${result.results.summary}\n\nPassed: ${result.results.passed}/${result.results.total_tests}`);
+                    }}
+                    className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm"
+                  >
+                    🧪 Test System
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const response = await fetch('/api/admin/replacement-test-debug');
+                      const result = await response.json();
+                      console.log('Debug Info:', result);
+                      alert(`Debug Info:\n\nWooCommerce URL: ${result.debug.environment.WOOCOMMERCE_URL}\nTracking matches: ${result.debug.database.tracking_matches_count}\nWooCommerce Error: ${result.debug.woocommerce.connection_error || 'None'}`);
+                    }}
+                    className="px-4 py-2 bg-yellow-500 text-white rounded-md hover:bg-yellow-600 text-sm"
+                  >
+                    🔍 Debug Info
+                  </button>
+                </div>
+              </div>
+              <p className="text-gray-600 text-sm">
+                Beheer vervangingsproducten voor vertraagde leveringen. Klanten kunnen via email een gratis vervangingsfles aanvragen.
+              </p>
+            </div>
+
+            {/* Email Templates */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">📧 Email Templates</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">📧 Email Templates</h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => window.open('/admin/email-template-editor', '_blank')}
+                    className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm"
+                  >
+                    ✏️ Beheer Templates
+                  </button>
+                  <button
+                    onClick={() => window.open('/admin/email-testing', '_blank')}
+                    className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 text-sm"
+                  >
+                    🧪 Test Emails
+                  </button>
+                  <button
+                    onClick={() => window.open('/admin/email-analytics', '_blank')}
+                    className="px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600 text-sm"
+                  >
+                    📊 Analytics
+                  </button>
+                </div>
+              </div>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Day 3 Template</label>
@@ -1173,6 +1288,173 @@ export default function AdminSettings() {
         {/* DHL API Tab */}
         {activeTab === 'dhl-api' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* DHL API Usage Dashboard */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">📊 DHL API Usage</h2>
+                <button
+                  onClick={fetchDHLApiStats}
+                  disabled={dhlApiStatsLoading}
+                  className="px-3 py-1 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-50 text-sm"
+                >
+                  {dhlApiStatsLoading ? '🔄' : '📊'} Refresh
+                </button>
+              </div>
+
+              {dhlApiStatsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-2 text-gray-600">Loading stats...</span>
+                </div>
+              ) : dhlApiStats ? (
+                <div className="space-y-4">
+                  {/* Current Status */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-gray-700">Current API Key</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        dhlApiStats.currentKey === 'primary' 
+                          ? 'bg-green-100 text-green-800' 
+                          : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {dhlApiStats.currentKey === 'primary' ? '🔑 Primary' : '🗝️ Secondary'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Last reset: {new Date(dhlApiStats.lastReset).toLocaleString('nl-NL')} 
+                      ({dhlApiStats.hoursSinceReset}h ago)
+                    </div>
+                  </div>
+
+                  {/* Primary Key Usage */}
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center">
+                        <span className="text-green-600 mr-2">🔑</span>
+                        <span className="font-medium">Primary Key</span>
+                        {!dhlApiStats.primaryKeyAvailable && (
+                          <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 text-xs rounded">Not configured</span>
+                        )}
+                      </div>
+                      <span className="text-sm text-gray-600">
+                        {dhlApiStats.primaryKeyCalls}/{dhlApiStats.callLimit}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          dhlApiStats.primaryKeyCalls >= dhlApiStats.callLimit 
+                            ? 'bg-red-500' 
+                            : dhlApiStats.primaryKeyCalls >= dhlApiStats.callLimit * 0.8 
+                            ? 'bg-orange-500' 
+                            : 'bg-green-500'
+                        }`}
+                        style={{ 
+                          width: `${Math.min(100, (dhlApiStats.primaryKeyCalls / dhlApiStats.callLimit) * 100)}%` 
+                        }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>0</span>
+                      <span className={
+                        dhlApiStats.primaryKeyCalls >= dhlApiStats.callLimit * 0.9 
+                          ? 'font-medium text-red-600' 
+                          : ''
+                      }>
+                        {Math.round((dhlApiStats.primaryKeyCalls / dhlApiStats.callLimit) * 100)}% used
+                      </span>
+                      <span>{dhlApiStats.callLimit}</span>
+                    </div>
+                  </div>
+
+                  {/* Secondary Key Usage */}
+                  <div className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center">
+                        <span className="text-blue-600 mr-2">🗝️</span>
+                        <span className="font-medium">Secondary Key</span>
+                        {!dhlApiStats.secondaryKeyAvailable && (
+                          <span className="ml-2 px-2 py-1 bg-orange-100 text-orange-700 text-xs rounded">Not configured</span>
+                        )}
+                      </div>
+                      <span className="text-sm text-gray-600">
+                        {dhlApiStats.secondaryKeyCalls}/{dhlApiStats.callLimit}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          dhlApiStats.secondaryKeyCalls >= dhlApiStats.callLimit 
+                            ? 'bg-red-500' 
+                            : dhlApiStats.secondaryKeyCalls >= dhlApiStats.callLimit * 0.8 
+                            ? 'bg-orange-500' 
+                            : 'bg-blue-500'
+                        }`}
+                        style={{ 
+                          width: `${Math.min(100, (dhlApiStats.secondaryKeyCalls / dhlApiStats.callLimit) * 100)}%` 
+                        }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>0</span>
+                      <span className={
+                        dhlApiStats.secondaryKeyCalls >= dhlApiStats.callLimit * 0.9 
+                          ? 'font-medium text-red-600' 
+                          : ''
+                      }>
+                        {Math.round((dhlApiStats.secondaryKeyCalls / dhlApiStats.callLimit) * 100)}% used
+                      </span>
+                      <span>{dhlApiStats.callLimit}</span>
+                    </div>
+                  </div>
+
+                  {/* Total Summary */}
+                  <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-lg p-4 border border-blue-200">
+                    <div className="grid grid-cols-2 gap-4 text-center">
+                      <div>
+                        <div className="text-2xl font-bold text-blue-600">{dhlApiStats.totalCalls}</div>
+                        <div className="text-xs text-gray-600">Total Calls Today</div>
+                      </div>
+                      <div>
+                        <div className="text-2xl font-bold text-green-600">
+                          {dhlApiStats.callLimit * 2 - dhlApiStats.totalCalls}
+                        </div>
+                        <div className="text-xs text-gray-600">Calls Remaining</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Configuration Status */}
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="text-sm font-medium text-gray-700 mb-2">Configuration Status</div>
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span>Primary Key:</span>
+                        <span className={dhlApiStats.primaryKeyAvailable ? 'text-green-600' : 'text-red-600'}>
+                          {dhlApiStats.primaryKeyAvailable ? '✅ Configured' : '❌ Missing'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Secondary Key:</span>
+                        <span className={dhlApiStats.secondaryKeyAvailable ? 'text-green-600' : 'text-orange-600'}>
+                          {dhlApiStats.secondaryKeyAvailable ? '✅ Configured' : '⚠️ Optional'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Daily Limit:</span>
+                        <span className="text-blue-600">{dhlApiStats.callLimit} per key</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <div className="text-4xl mb-2">📊</div>
+                  <p>Click "Refresh" to load API usage statistics</p>
+                </div>
+              )}
+            </div>
+
             {/* DHL API Testing */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">🚚 DHL Official API Testing</h2>

@@ -16,6 +16,7 @@
     "cheerio": "^1.0.0-rc.12",
     "cookie": "^1.0.2",
     "date-fns": "^2.30.0",
+    "framer-motion": "^12.23.11",
     "next": "^13.5.11",
     "puppeteer": "^23.10.4",
     "puppeteer-core": "^23.10.4",

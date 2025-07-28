@@ -10,8 +10,8 @@ const supabase = createClient(
 );
 
 // Rate limiting - will be overridden by settings
-let MAX_TRACKINGS_PER_RUN = 20;
-let DELAY_BETWEEN_SCRAPES = 3000; // 3 seconds between scrapes
+let MAX_TRACKINGS_PER_RUN = 5;  // REDUCED: Much more conservative for DHL API
+let DELAY_BETWEEN_SCRAPES = 5000; // INCREASED: 5 seconds between scrapes to avoid rate limits
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Allow both GET and POST methods for Vercel Cron compatibility
@@ -80,43 +80,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: 'Could not fetch system settings' });
     }
 
+    const frequencyMinutes = settings.cron_frequency_minutes || 60;
+    console.log(`🎯 Cron job running with ${frequencyMinutes} minute frequency`);
+
     // Apply settings to rate limiting
-    if (settings.cron_max_trackings_per_run) {
-      MAX_TRACKINGS_PER_RUN = settings.cron_max_trackings_per_run;
-    }
-    if (settings.cron_delay_between_scrapes) {
-      DELAY_BETWEEN_SCRAPES = settings.cron_delay_between_scrapes;
-    }
+    MAX_TRACKINGS_PER_RUN = settings.cron_max_trackings_per_run || 20;
+    DELAY_BETWEEN_SCRAPES = settings.cron_delay_between_scrapes || 3000;
 
     console.log(`⚙️ Cron settings: max ${MAX_TRACKINGS_PER_RUN} trackings, ${DELAY_BETWEEN_SCRAPES}ms delay`);
-
-    // Update cron start time in settings
-    await supabase
-      .from('system_settings')
-      .update({ 
-        last_cron_run: cronStartTime.toISOString(),
-        last_cron_status: 'running'
-      })
-      .eq('id', 1);
 
     // Check if auto refresh is disabled or emergency stop is active
     if (!settings.auto_refresh_enabled || settings.emergency_stop) {
       const reason = settings.emergency_stop ? 'Emergency stop active' : 'Auto refresh disabled';
       console.log(`🚨 ${reason} - skipping cron job`);
       
-      // Update status
-      await supabase
-        .from('system_settings')
-        .update({ 
-          last_cron_status: 'skipped',
-          last_cron_summary: { 
-            reason,
-            timestamp: cronStartTime.toISOString(),
-            duration_ms: Date.now() - cronStartTime.getTime()
-          }
-        })
-        .eq('id', 1);
-
       // Log skip event
       await logTrackingAction({
         tracking_code: 'SYSTEM',
@@ -172,6 +149,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     console.log(`⏰ Time to run! Frequency: every ${cronFrequencyMinutes} minutes`);
+
+    // NOW update cron start time in settings (AFTER frequency check)
+    await supabase
+      .from('system_settings')
+      .update({ 
+        last_cron_run: cronStartTime.toISOString(),
+        last_cron_status: 'running'
+      })
+      .eq('id', 1);
 
     // Get trackings that need refreshing
     const { data: trackings, error: trackingsError } = await supabase

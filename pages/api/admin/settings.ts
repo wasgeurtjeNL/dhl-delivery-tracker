@@ -50,8 +50,8 @@ const DEFAULT_SETTINGS: SystemSettings = {
   auto_refresh_enabled: true,
   // NEW: Cron settings
   cron_frequency_minutes: 60,  // Default elk uur
-  cron_max_trackings_per_run: 20,  // Max 20 trackings per run
-  cron_delay_between_scrapes: 3000,  // 3 seconden tussen scrapes
+  cron_max_trackings_per_run: 5,  // REDUCED: Much more conservative for DHL API
+  cron_delay_between_scrapes: 5000,  // INCREASED: 5 seconden tussen scrapes voor DHL API limits
   last_cron_run: null,
   last_cron_status: null,
   last_cron_summary: null

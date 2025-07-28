@@ -143,8 +143,15 @@ export interface DHLTimelineEvent {
   location?: string;
 }
 
-// ===== NEW DHL OFFICIAL API IMPLEMENTATION =====
+// DHL API Call Tracking & Multi-Key Management
+interface DHLApiStats {
+  primaryKeyCalls: number;
+  secondaryKeyCalls: number;
+  lastReset: Date;
+  currentKey: 'primary' | 'secondary';
+}
 
+// DHL API Response Interface
 interface DHLApiResponse {
   shipments: Array<{
     id: string;
@@ -197,24 +204,98 @@ interface DHLApiResponse {
   }>;
 }
 
+let apiStats: DHLApiStats = {
+  primaryKeyCalls: 0,
+  secondaryKeyCalls: 0,
+  lastReset: new Date(),
+  currentKey: 'primary'
+};
+
+/**
+ * Get the appropriate DHL API key based on usage tracking
+ */
+function getDHLApiKey(): { key: string; keyType: 'primary' | 'secondary'; stats: DHLApiStats } {
+  const primaryKey = process.env.DHL_API_KEY;
+  const secondaryKey = process.env.DHL_API_KEY_SECONDARY;
+  const callLimit = parseInt(process.env.DHL_API_CALL_LIMIT || '250');
+  
+  if (!primaryKey) {
+    throw new Error('DHL_API_KEY niet gevonden in environment variables');
+  }
+  
+  // Check if we should reset daily counters
+  const now = new Date();
+  const hoursSinceReset = (now.getTime() - apiStats.lastReset.getTime()) / (1000 * 60 * 60);
+  if (hoursSinceReset >= 24) {
+    console.log('🔄 Resetting daily API call counters');
+    apiStats.primaryKeyCalls = 0;
+    apiStats.secondaryKeyCalls = 0;
+    apiStats.lastReset = now;
+    apiStats.currentKey = 'primary';
+  }
+  
+  // Determine which key to use
+  let selectedKey = primaryKey;
+  let keyType: 'primary' | 'secondary' = 'primary';
+  
+  if (apiStats.primaryKeyCalls >= callLimit && secondaryKey) {
+    selectedKey = secondaryKey;
+    keyType = 'secondary';
+    apiStats.currentKey = 'secondary';
+  } else if (apiStats.primaryKeyCalls < callLimit) {
+    selectedKey = primaryKey;
+    keyType = 'primary';
+    apiStats.currentKey = 'primary';
+  } else if (!secondaryKey) {
+    console.log('⚠️ Primary key limit reached but no secondary key configured');
+    selectedKey = primaryKey; // Continue with primary (will likely rate limit)
+    keyType = 'primary';
+  }
+  
+  return { key: selectedKey, keyType, stats: { ...apiStats } };
+}
+
+/**
+ * Track an API call and update counters
+ */
+function trackDHLApiCall(keyType: 'primary' | 'secondary') {
+  if (keyType === 'primary') {
+    apiStats.primaryKeyCalls++;
+  } else {
+    apiStats.secondaryKeyCalls++;
+  }
+  
+  const total = apiStats.primaryKeyCalls + apiStats.secondaryKeyCalls;
+  const callLimit = parseInt(process.env.DHL_API_CALL_LIMIT || '250');
+  
+  console.log(`📊 DHL API Usage: Primary=${apiStats.primaryKeyCalls}/${callLimit}, Secondary=${apiStats.secondaryKeyCalls}, Total=${total}, Current=${keyType}`);
+  
+  // Log warnings near limits
+  if (keyType === 'primary' && apiStats.primaryKeyCalls >= callLimit - 10) {
+    console.log(`⚠️ Primary API key approaching limit! ${apiStats.primaryKeyCalls}/${callLimit} calls used`);
+  }
+  if (keyType === 'secondary' && apiStats.secondaryKeyCalls >= callLimit - 10) {
+    console.log(`⚠️ Secondary API key approaching limit! ${apiStats.secondaryKeyCalls}/${callLimit} calls used`);
+  }
+}
+
 /**
  * Nieuwe DHL API implementatie via officiële DHL Shipment Tracking API
+ * Met retry logic voor rate limiting en multi-key support
  */
-export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DHLTrackingResult> {
+export async function scrapeDHLWithOfficialAPI(trackingCode: string, retryCount = 0): Promise<DHLTrackingResult> {
   const startTime = Date.now();
+  const maxRetries = 3;
   
   try {
-    console.log(`🚀 DHL Official API Scraping start for: ${trackingCode}`);
+    console.log(`🚀 DHL Official API Scraping start for: ${trackingCode}${retryCount > 0 ? ` (retry ${retryCount}/${maxRetries})` : ''}`);
     
-    // Check voor API key
-    const apiKey = process.env.DHL_API_KEY;
-    if (!apiKey) {
-      throw new Error('DHL_API_KEY niet gevonden in environment variables');
-    }
+    // Get appropriate API key based on usage tracking
+    const { key: apiKey, keyType, stats } = getDHLApiKey();
     
     // API call naar DHL
     const url = `https://api-eu.dhl.com/track/shipments?trackingNumber=${trackingCode}`;
-    console.log(`🌐 Calling DHL API: ${url}`);
+    console.log(`🌐 Calling DHL API: ${url} (using ${keyType} key)`);
     
     const response = await fetch(url, {
       method: 'GET',
@@ -224,6 +305,9 @@ export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DH
         'User-Agent': 'TrackingApp/1.0'
       }
     });
+    
+    // Track the API call (regardless of success/failure)
+    trackDHLApiCall(keyType);
     
     if (!response.ok) {
       if (response.status === 404) {
@@ -237,6 +321,14 @@ export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DH
           durationDays: undefined,
           processingTime: Date.now() - startTime
         };
+      }
+      
+      // Handle rate limiting with retry
+      if (response.status === 429 && retryCount < maxRetries) {
+        const waitTime = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
+        console.log(`⏱️ Rate limited (429), waiting ${waitTime}ms before retry ${retryCount + 1}/${maxRetries}`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        return scrapeDHLWithOfficialAPI(trackingCode, retryCount + 1);
       }
       
       throw new Error(`DHL API error: ${response.status} ${response.statusText}`);
@@ -439,6 +531,24 @@ export async function scrapeDHLWithOfficialAPI(trackingCode: string): Promise<DH
   }
 }
 
+/**
+ * Get current DHL API usage statistics (for admin dashboard)
+ */
+export function getDHLApiStats(): DHLApiStats {
+  return { ...apiStats };
+}
+
+/**
+ * Reset DHL API statistics (for testing or manual reset)
+ */
+export function resetDHLApiStats(): void {
+  apiStats.primaryKeyCalls = 0;
+  apiStats.secondaryKeyCalls = 0;
+  apiStats.lastReset = new Date();
+  apiStats.currentKey = 'primary';
+  console.log('🔄 DHL API stats manually reset');
+}
+
 // ULTRA VERBETERDE Nederlandse datum parser met Amsterdam timezone
 export function parseNLDate(dateStr: string): Date | null {
   if (!dateStr || dateStr.trim().length === 0) return null;
@@ -561,18 +671,25 @@ export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult
     }
     
     // SECOND ATTEMPT: Try Puppeteer scraping (fallback for when API fails)
-    try {
-      console.log(`🎯 Attempting Puppeteer scraping for ${trackingCode}`);
-      const puppeteerResult = await scrapeDHLWithPuppeteer(trackingCode);
-      
-      if (puppeteerResult && puppeteerResult.deliveryStatus !== 'fout' && puppeteerResult.statusTabel.length > 50) {
-        console.log(`✅ Got good result from DHL Puppeteer for ${trackingCode}: ${puppeteerResult.deliveryStatus} with ${puppeteerResult.statusTabel.length} entries`);
-        return puppeteerResult;
-      } else {
-        console.log(`⚠️ Puppeteer returned poor quality result for ${trackingCode} (${puppeteerResult?.statusTabel?.length || 0} entries), trying legacy browser pool`);
+    // Skip Puppeteer on serverless environments (Vercel) where Chrome is not available
+    const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY;
+    
+    if (!isServerless) {
+      try {
+        console.log(`🎯 Attempting Puppeteer scraping for ${trackingCode}`);
+        const puppeteerResult = await scrapeDHLWithPuppeteer(trackingCode);
+        
+        if (puppeteerResult && puppeteerResult.deliveryStatus !== 'fout' && puppeteerResult.statusTabel.length > 50) {
+          console.log(`✅ Got good result from DHL Puppeteer for ${trackingCode}: ${puppeteerResult.deliveryStatus} with ${puppeteerResult.statusTabel.length} entries`);
+          return puppeteerResult;
+        } else {
+          console.log(`⚠️ Puppeteer returned poor quality result for ${trackingCode} (${puppeteerResult?.statusTabel?.length || 0} entries), trying legacy browser pool`);
+        }
+      } catch (puppeteerError) {
+        console.log(`⚠️ DHL Puppeteer failed for ${trackingCode}, trying legacy browser pool:`, puppeteerError);
       }
-    } catch (puppeteerError) {
-      console.log(`⚠️ DHL Puppeteer failed for ${trackingCode}, trying legacy browser pool:`, puppeteerError);
+    } else {
+      console.log(`⏭️ Skipping Puppeteer on serverless environment for ${trackingCode}`);
     }
     
     // THIRD ATTEMPT: Legacy browser pool implementation (final fallback)
@@ -1007,7 +1124,7 @@ export async function scrapeDHL(trackingCode: string): Promise<DHLTrackingResult
         } else if (deliveryStatus === 'onderweg') {
           // Voor onderweg pakketten: gebruik meest recente event als schatting
           afleverMoment = sortedEvents[sortedEvents.length - 1].parsedDate;
-          console.log(`🚚 Onderweg: laatste update ${afleverMoment?.toISOString()}`);
+          console.log(`🚛 Onderweg: laatste update ${afleverMoment?.toISOString()}`);
         }
       } else {
         console.log(`⚠️ Geen events met geldige datums gevonden`);
