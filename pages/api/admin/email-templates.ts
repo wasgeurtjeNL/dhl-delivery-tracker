@@ -58,17 +58,31 @@ async function getTemplates(req: NextApiRequest, res: NextApiResponse) {
   const { id, type } = req.query;
 
   try {
-    let query = supabase.from('email_templates').select('*');
+    let data, error;
 
     if (id) {
-      query = query.eq('id', id).single();
+      const result = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('id', id)
+        .single();
+      data = result.data;
+      error = result.error;
     } else if (type) {
-      query = query.eq('template_type', type);
+      const result = await supabase
+        .from('email_templates')
+        .select('*')
+        .eq('template_type', type);
+      data = result.data;
+      error = result.error;
     } else {
-      query = query.order('template_type');
+      const result = await supabase
+        .from('email_templates')
+        .select('*')
+        .order('template_type');
+      data = result.data;
+      error = result.error;
     }
-
-    const { data, error } = await query;
 
     if (error) {
       throw error;
