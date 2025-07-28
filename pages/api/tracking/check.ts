@@ -158,7 +158,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const alreadySentChoice = await checkIfAlreadyLogged(tracking_code, 'choice_sent');
       
       if (!alreadySentChoice) {
-        await sendSupabaseEmail({
+        await sendSupabaseEmailWithRetry({
           to: { email, name: first_name },
           templateType: 'day5_choice',
           mergeVars: {
@@ -189,7 +189,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const alreadySentGift = await checkIfAlreadyLogged(tracking_code, 'gift_notice_sent');
       
       if (!alreadySentGift) {
-        await sendSupabaseEmail({
+        await sendSupabaseEmailWithRetry({
           to: { email, name: first_name },
           templateType: 'day10_gift_notice',
           mergeVars: { first_name, order_id }
