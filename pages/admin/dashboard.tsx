@@ -54,6 +54,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   
+  // State voor uitklapbare secties
+  const [isActivityFeedExpanded, setIsActivityFeedExpanded] = useState(false);
+  const [isQuickStatsExpanded, setIsQuickStatsExpanded] = useState(false);
+  
   // Progress indicators
   const loadingProgress = useProgress();
   const trackingCheckProgress = useProgress();
@@ -455,47 +459,77 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           {/* Activity Feed */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-                🔴 Live Activity Feed
+            <div 
+              className="p-6 border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors"
+              onClick={() => setIsActivityFeedExpanded(!isActivityFeedExpanded)}
+            >
+              <h2 className="text-xl font-semibold text-gray-900 flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  🔴 Live Activity Feed
+                </span>
+                <span className={`transform transition-transform duration-200 ${isActivityFeedExpanded ? 'rotate-180' : ''}`}>
+                  ▼
+                </span>
               </h2>
             </div>
-            <div className="p-6">
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {activities.map((activity) => (
-                  <ActivityItem key={activity.id} activity={activity} />
-                ))}
+            {isActivityFeedExpanded && (
+              <div className="p-6">
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {activities.map((activity) => (
+                    <ActivityItem key={activity.id} activity={activity} />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+            {!isActivityFeedExpanded && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                Klik om uit te klappen ({activities.length} activiteiten)
+              </div>
+            )}
           </div>
 
           {/* Quick Stats */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900">📊 Quick Stats</h2>
+            <div 
+              className="p-6 border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors"
+              onClick={() => setIsQuickStatsExpanded(!isQuickStatsExpanded)}
+            >
+              <h2 className="text-xl font-semibold text-gray-900 flex items-center justify-between">
+                <span>📊 Quick Stats</span>
+                <span className={`transform transition-transform duration-200 ${isQuickStatsExpanded ? 'rotate-180' : ''}`}>
+                  ▼
+                </span>
+              </h2>
             </div>
-            <div className="p-6">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Pakketten dat vandaag actie nodig heeft:</span>
-                  <span className="font-semibold text-orange-600">
-                    {(trackings || []).filter(t => t.statusColor === 'orange' || t.statusColor === 'red').length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Klanten die hebben gereageerd:</span>
-                  <span className="font-semibold text-green-600">
-                    {(trackings || []).filter(t => t.status.includes('gereageerd')).length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Errors laatste 24u:</span>
-                  <span className="font-semibold text-red-600">
-                    {activities.filter(a => a.type === 'error').length}
-                  </span>
+            {isQuickStatsExpanded && (
+              <div className="p-6">
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Pakketten dat vandaag actie nodig heeft:</span>
+                    <span className="font-semibold text-orange-600">
+                      {(trackings || []).filter(t => t.statusColor === 'orange' || t.statusColor === 'red').length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Klanten die hebben gereageerd:</span>
+                    <span className="font-semibold text-green-600">
+                      {(trackings || []).filter(t => t.status.includes('gereageerd')).length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600">Errors laatste 24u:</span>
+                    <span className="font-semibold text-red-600">
+                      {activities.filter(a => a.type === 'error').length}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+            {!isQuickStatsExpanded && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                Klik om uit te klappen (statistieken)
+              </div>
+            )}
           </div>
         </div>
 
