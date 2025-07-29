@@ -1,6 +1,7 @@
 // pages/api/admin/dhl-api-stats.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { requireAdminAuth } from '../../../lib/adminAuth';
+import { getDHLApiStats } from '../../../lib/dhlApiLogger';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
@@ -11,23 +12,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // Import the scrapeDHL module to access API stats
-    const { getDHLApiStats } = await import('../../../lib/scrapeDHL');
-    
-    const stats = getDHLApiStats();
+    // Get stats from database instead of in-memory
+    const stats = await getDHLApiStats();
     
     return res.status(200).json({
       success: true,
       stats: {
         primaryKeyCalls: stats.primaryKeyCalls,
         secondaryKeyCalls: stats.secondaryKeyCalls,
-        totalCalls: stats.primaryKeyCalls + stats.secondaryKeyCalls,
+        totalCalls: stats.totalCalls,
         currentKey: stats.currentKey,
         lastReset: stats.lastReset,
-        callLimit: parseInt(process.env.DHL_API_CALL_LIMIT || '250'),
-        primaryKeyAvailable: !!process.env.DHL_API_KEY,
-        secondaryKeyAvailable: !!process.env.DHL_API_KEY_SECONDARY,
-        hoursSinceReset: Math.round((new Date().getTime() - stats.lastReset.getTime()) / (1000 * 60 * 60) * 10) / 10
+        callLimit: stats.callLimit,
+        primaryKeyAvailable: stats.primaryKeyAvailable,
+        secondaryKeyAvailable: stats.secondaryKeyAvailable,
+        hoursSinceReset: stats.hoursSinceReset
       }
     });
   } catch (error) {
