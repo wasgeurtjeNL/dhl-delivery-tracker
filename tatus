@@ -1,0 +1,3 @@
+[33m0568941[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Simplify Amsterdam timezone logic to fix linter errors
+[33me0d0e3b[m Fix timezone consistency: force Amsterdam timezone for all date parsing (Vercel vs localhost)
+[33m7f28456[m Add extended timeouts for Vercel: increase page load, selector wait, and animation times
