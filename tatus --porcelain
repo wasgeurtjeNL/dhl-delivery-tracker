@@ -1,0 +1,5 @@
+[33mbe79479[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m Merge remote repository with local changes
+[33m7c7153f[m  Interactieve landingspagina /vertraagd met Waspunten uitleg
+[33m55610b6[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Add collapsible Live Activity Feed and Quick Stats sections
+[33m07bd38c[m Fix replacement tests - no longer pollutes real data
+[33m047b2c7[m Implement database tracking for DHL API calls and replacement analytics
