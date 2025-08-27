@@ -55,7 +55,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         afgegeven_moment,
         duration,
         duration_days,
-        last_scraped_at
+        last_scraped_at,
+        dagen_onderweg
       `)
       .order('created_at', { ascending: false });
 
@@ -71,21 +72,57 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Zoekfunctionaliteit - zoek in meerdere velden
     if (search) {
-      query = query.or(
-        `email.ilike.%${search}%,` +
-        `first_name.ilike.%${search}%,` +
-        `last_name.ilike.%${search}%,` +
-        `tracking_code.ilike.%${search}%,` +
-        `order_id.eq.${isNaN(parseInt(search)) ? 0 : parseInt(search)},` +
-        `batch_id.ilike.%${search}%`
-      );
+      const searchTerms = search.trim().split(/\s+/).filter(term => term.length > 0);
+      
+      if (searchTerms.length > 1) {
+        const firstName = searchTerms[0];
+        const lastName = searchTerms.slice(1).join(' ');
+        
+        // Gebruik `~*` voor case-insensitive regex met `\\y` voor woordgrens (begint met)
+        const nameFilter = `and(first_name.~*.\\y${firstName},last_name.~*.\\y${lastName})`;
+        
+        query = query.or(
+          `${nameFilter},` +
+          `email.ilike.%${search}%,` + // Blijf 'contains' gebruiken voor email
+          `tracking_code.ilike.%${search}%`
+        );
+      } else {
+        const searchTerm = searchTerms[0];
+        // Gebruik `~*` en `\\y` voor 'begint met heel woord' voor namen
+        query = query.or(
+          `email.ilike.%${searchTerm}%,` +
+          `first_name.~*.\\y${searchTerm},` +
+          `last_name.~*.\\y${searchTerm},` +
+          `tracking_code.ilike.%${searchTerm}%,` +
+          `order_id.eq.${isNaN(parseInt(searchTerm)) ? 0 : parseInt(searchTerm)},` +
+          `batch_id.ilike.%${searchTerm}%`
+        );
+      }
     }
 
-    const { data: trackings, error } = await query.range(offset, offset + limit - 1);
+    // Paginatie
+    const startIndex = (page - 1) * limit;
+    query = query.range(startIndex, startIndex + limit - 1);
 
-    if (error) {
-      throw error;
-    }
+    let { data: trackings, error, count } = await query;
+    if (error) throw error;
+    
+    // Data verrijken (bijv. klantnaam samenvoegen, dagen_onderweg berekenen)
+    const enrichedTrackings = trackings.map(t => {
+      const verzendMoment = new Date(t.created_at);
+      const dagenOnderweg = Math.floor((new Date().getTime() - verzendMoment.getTime()) / (1000 * 60 * 60 * 24));
+      
+      return {
+        ...t,
+        customerName: `${t.first_name || ''} ${t.last_name || ''}`.trim(),
+        dagenOnderweg: dagenOnderweg
+      }
+    });
+
+    // Pas de dagen-filter toe *na* de berekening
+    const filteredTrackings = enrichedTrackings.filter(t => 
+      t.dagenOnderweg >= daysMin && t.dagenOnderweg <= daysMax
+    );
 
     // Functie voor gebruiksvriendelijke tijd weergave
     const formatTimeUnderweg = (startMoment: Date, endMoment: Date): string => {
@@ -110,8 +147,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     };
 
     // Voor elke tracking, haal de laatste logs op en bereken informatie
-    const enrichedTrackings = await Promise.all(
-      trackings?.map(async (tracking, index) => {
+    const enrichedTrackingsWithDhlInfo = await Promise.all(
+      filteredTrackings?.map(async (tracking, index) => {
         const today = new Date();
         const verzendMoment = new Date(tracking.created_at);
         
@@ -317,10 +354,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           id: tracking.id,
           rowNumber: offset + index + 1,
           trackingCode: tracking.tracking_code,
-          customerName: `${tracking.first_name} ${tracking.last_name}`.trim(),
+          customerName: tracking.customerName,
           email: tracking.email,
           orderId: tracking.order_id,
-          dagenOnderweg: dagenOnderwegNumber,
+          dagenOnderweg: tracking.dagen_onderweg,
           tijdOnderweg,
           status,
           statusColor,
@@ -363,13 +400,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }) || []
     );
 
-    // Filter op dagen onderweg (na enrichment omdat we de berekende waarde nodig hebben)
-    const filteredTrackings = enrichedTrackings.filter(t => 
-      t.dagenOnderweg >= daysMin && t.dagenOnderweg <= daysMax &&
-      (statusFilter === '' || t.status.toLowerCase().includes(statusFilter.toLowerCase())) &&
-      (search === '' || t.customerName.toLowerCase().includes(search.toLowerCase()) || t.email.toLowerCase().includes(search.toLowerCase()) || t.trackingCode.toLowerCase().includes(search.toLowerCase()) || t.orderId.toString().includes(search))
-    );
-
     // Voor accurate paginatie tellen we met dezelfde filters
     let countQuery = supabase
       .from('tracking_matches')
@@ -394,45 +424,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       );
     }
 
-    const { count } = await countQuery;
+    // De count query heeft geen dagen_onderweg filter nodig omdat we dit na de fetch doen
+
+    const { count: totalCount, error: countError } = await countQuery;
 
     // Bereken statistieken
-    const activeCount = filteredTrackings.filter(t => t.isActive).length;
-    const needsActionCount = filteredTrackings.filter(t => t.needsAction && t.isActive).length;
+    const activeCount = enrichedTrackingsWithDhlInfo.filter(t => t.isActive).length;
+    const needsActionCount = enrichedTrackingsWithDhlInfo.filter(t => t.needsAction && t.isActive).length;
 
     // Bereken duration statistieken
-    const trackingsWithDuration = filteredTrackings.filter(t => t.dhlInfo?.durationDays);
+    const trackingsWithDuration = enrichedTrackingsWithDhlInfo.filter(t => t.dhlInfo?.durationDays);
     const avgDuration = trackingsWithDuration.length > 0 
       ? trackingsWithDuration.reduce((sum, t) => sum + (t.dhlInfo?.durationDays || 0), 0) / trackingsWithDuration.length
       : 0;
     
-    const completedTrackings = filteredTrackings.filter(t => t.deliveryStatus === 'bezorgd' && t.dhlInfo?.durationDays);
+    const completedTrackings = enrichedTrackingsWithDhlInfo.filter(t => t.deliveryStatus === 'bezorgd' && t.dhlInfo?.durationDays);
     const avgCompletedDuration = completedTrackings.length > 0
       ? completedTrackings.reduce((sum, t) => sum + (t.dhlInfo?.durationDays || 0), 0) / completedTrackings.length
       : 0;
 
     // Database paginering is al toegepast via .range(), geen extra JavaScript paginering nodig
     res.status(200).json({
-      trackings: filteredTrackings,
+      trackings: enrichedTrackingsWithDhlInfo, // Gebruik de verrijkte data
       pagination: {
         page,
         limit,
-        total: count || 0,
-        pages: Math.ceil((count || 0) / limit),
+        total: totalCount || 0,
+        pages: Math.ceil((totalCount || 0) / limit),
         showing: filteredTrackings.length,
-        filteredTotal: filteredTrackings.length
+        filteredTotal: filteredTrackings.length // Dit is niet 100% accuraat maar beste wat we kunnen doen zonder DB filter
       },
       stats: {
         totalActive: activeCount,
         needsAction: needsActionCount,
         timingSettings,
-        totalRecords: count || 0,
+        totalRecords: totalCount || 0,
         statusBreakdown: {
-          actief: filteredTrackings.filter(t => t.isActive).length,
-          inactief: filteredTrackings.filter(t => !t.isActive).length,
-          bezorgd: filteredTrackings.filter(t => t.deliveryStatus === 'bezorgd').length,
-          onderweg: filteredTrackings.filter(t => t.deliveryStatus === 'onderweg').length,
-          errors: filteredTrackings.filter(t => t.status === 'Fout').length
+          actief: enrichedTrackingsWithDhlInfo.filter(t => t.isActive).length,
+          inactief: enrichedTrackingsWithDhlInfo.filter(t => !t.isActive).length,
+          bezorgd: enrichedTrackingsWithDhlInfo.filter(t => t.deliveryStatus === 'bezorgd').length,
+          onderweg: enrichedTrackingsWithDhlInfo.filter(t => t.deliveryStatus === 'onderweg').length,
+          errors: enrichedTrackingsWithDhlInfo.filter(t => t.status === 'Fout').length
         },
         durationStats: {
           trackingsWithDuration: trackingsWithDuration.length,

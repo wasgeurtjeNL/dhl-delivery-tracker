@@ -80,6 +80,12 @@ export default function TrackingDashboard() {
     daysMax: 999,
     active: true
   });
+
+  // aparte state voor de inputvelden, om de UX te verbeteren
+  const [dayFilters, setDayFilters] = useState({
+    min: '0',
+    max: '999'
+  });
   
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -149,6 +155,31 @@ export default function TrackingDashboard() {
     const updatedFilters = { ...filters, ...newFilters };
     setFilters(updatedFilters);
     fetchTrackings(1, updatedFilters, true); // Skip DHL for filter changes
+  };
+
+  const handleDayFilterChange = (type: 'min' | 'max', value: string) => {
+    // Update de lokale state direct voor een responsieve UI
+    setDayFilters(prev => ({ ...prev, [type]: value }));
+
+    // Debounce de daadwerkelijke filter-actie
+    // (In een echte app zou je hier een debounce hook gebruiken)
+    setTimeout(() => {
+      const numericValue = parseInt(value);
+      if (!isNaN(numericValue)) {
+        if (type === 'min') {
+          handleFilterChange({ daysMin: numericValue });
+        } else {
+          handleFilterChange({ daysMax: numericValue });
+        }
+      } else {
+        // Als het veld leeg is, reset naar default
+        if (type === 'min') {
+          handleFilterChange({ daysMin: 0 });
+        } else {
+          handleFilterChange({ daysMax: 999 });
+        }
+      }
+    }, 500); // 500ms delay
   };
 
   // Manual refresh function for getting fresh DHL data with queue system
@@ -731,8 +762,8 @@ export default function TrackingDashboard() {
                   type="number"
                   min="0"
                   max="365"
-                  value={filters.daysMin}
-                  onChange={(e) => handleFilterChange({ daysMin: parseInt(e.target.value) || 0 })}
+                  value={dayFilters.min}
+                  onChange={(e) => handleDayFilterChange('min', e.target.value)}
                   className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
@@ -743,8 +774,8 @@ export default function TrackingDashboard() {
                   type="number"
                   min="0"
                   max="365"
-                  value={filters.daysMax}
-                  onChange={(e) => handleFilterChange({ daysMax: parseInt(e.target.value) || 999 })}
+                  value={dayFilters.max}
+                  onChange={(e) => handleDayFilterChange('max', e.target.value)}
                   className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 />
               </div>
