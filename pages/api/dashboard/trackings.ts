@@ -22,6 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const daysMin = parseInt(req.query.daysMin as string) || 0;
     const daysMax = parseInt(req.query.daysMax as string) || 999;
     const deliveryStatusFilter = req.query.deliveryStatus as string || '';
+    const batchIdFilter = req.query.batchId as string || '';
     
     // Performance parameter - skip DHL scraping for quick overview (used by main dashboard)
     const skipDhlScraping = req.query.skipDhl === 'true';
@@ -55,9 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         afgegeven_moment,
         duration,
         duration_days,
-        last_scraped_at,
-        dagen_onderweg,
-        needs_action
+        last_scraped_at
       `)
       .order('created_at', { ascending: false });
 
@@ -71,152 +70,411 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       query = query.eq('delivery_status', deliveryStatusFilter);
     }
 
-    // Zoekfunctionaliteit - zoek in meerdere velden
-    if (search) {
-      const searchTerms = search.trim().split(/\s+/).filter(term => term.length > 0);
-      
-      if (searchTerms.length > 1) {
-        const firstName = searchTerms[0];
-        const lastName = searchTerms.slice(1).join(' ');
-        
-        // Gebruik `~*` voor case-insensitive regex met `\\y` voor woordgrens (begint met)
-        const nameFilter = `and(first_name.~*.\\y${firstName},last_name.~*.\\y${lastName})`;
-        
-        query = query.or(
-          `${nameFilter},` +
-          `email.ilike.%${search}%,` + // Blijf 'contains' gebruiken voor email
-          `tracking_code.ilike.%${search}%`
-        );
-      } else {
-        const searchTerm = searchTerms[0];
-        // Gebruik `~*` en `\\y` voor 'begint met heel woord' voor namen
-        query = query.or(
-          `email.ilike.%${searchTerm}%,` +
-          `first_name.~*.\\y${searchTerm},` +
-          `last_name.~*.\\y${searchTerm},` +
-          `tracking_code.ilike.%${searchTerm}%,` +
-          `order_id.eq.${isNaN(parseInt(searchTerm)) ? 0 : parseInt(searchTerm)},` +
-          `batch_id.ilike.%${searchTerm}%`
-        );
+    // Batch ID filter
+    if (batchIdFilter) {
+      query = query.ilike('batch_id', `%${batchIdFilter}%`);
+    }
+
+    // Days filter - moved to database level for accurate pagination
+    if (daysMin > 0 || daysMax < 999) {
+      // Convert days to timestamp conditions
+      const now = new Date();
+      if (daysMax < 999) {
+        const daysMaxDate = new Date(now.getTime() - daysMax * 24 * 60 * 60 * 1000);
+        query = query.gte('created_at', daysMaxDate.toISOString());
+      }
+      if (daysMin > 0) {
+        const daysMinDate = new Date(now.getTime() - daysMin * 24 * 60 * 60 * 1000);
+        query = query.lte('created_at', daysMinDate.toISOString());
       }
     }
 
-    // Paginatie
-    const startIndex = (page - 1) * limit;
-    query = query.range(startIndex, startIndex + limit - 1);
-
-    let { data: trackings, error, count } = await query;
-
-    if (error) throw error;
-
-    // Functie voor gebruiksvriendelijke tijd weergave
-    const formatDuration = (ms: number) => {
-      const seconds = Math.floor(ms / 1000);
-      const minutes = Math.floor(seconds / 60);
-      const hours = Math.floor(minutes / 60);
-      const days = Math.floor(hours / 24);
-      if (days > 0) return `${days} dag${days > 1 ? 'en' : ''}`;
-      if (hours > 0) return `${hours} uur`;
-      return `${minutes} min`;
-    };
-
-    // Stap 1: Lichtgewicht verrijking voor filtering
-    const enrichedForFiltering = trackings.map(t => {
-      const dagenOnderweg = Math.floor((new Date().getTime() - new Date(t.created_at).getTime()) / (1000 * 60 * 60 * 24));
+    // Enhanced search functionality - support for multiple search patterns
+    if (search) {
+      const searchTerms = search.trim().split(/\s+/).filter(term => term.length > 0);
       
-      let status = 'OK';
-      if (t.needs_action) { status = 'Actie nodig'; }
-      else if (dagenOnderweg >= 10) { status = 'Actie nodig'; }
-      else if (dagenOnderweg >= 5) { status = 'Gemonitord'; }
-      else if (dagenOnderweg >= 3) { status = 'Waarschuwing'; }
-
-      return {
-        ...t,
-        customerName: `${t.first_name || ''} ${t.last_name || ''}`.trim(),
-        dagenOnderweg: dagenOnderweg,
-        status: status,
-      };
-    });
-
-    // Stap 2: Filteren op basis van de verrijkte data
-    const filteredTrackings = enrichedForFiltering.filter(t => 
-      t.dagenOnderweg >= daysMin && 
-      t.dagenOnderweg <= daysMax &&
-      (deliveryStatusFilter === '' || !t.delivery_status || t.delivery_status.toLowerCase().includes(deliveryStatusFilter.toLowerCase())) &&
-      (statusFilter === '' || t.status.toLowerCase().includes(statusFilter.toLowerCase()))
-    );
-
-    // Stap 3: Zware verrijking (DHL info) en finale shaping, alleen op de gefilterde resultaten
-    const finalTrackings = await Promise.all(
-      filteredTrackings.map(async (tracking, index) => {
-        const verzendMoment = new Date(tracking.created_at);
-        const tijdOnderweg = formatDuration(new Date().getTime() - verzendMoment.getTime());
+      // Handle wildcard searches
+      if (search.includes('*')) {
+        const wildcardPattern = search.replace(/\*/g, '%');
+        query = query.or(
+          `email.ilike.${wildcardPattern},` +
+          `first_name.ilike.${wildcardPattern},` +
+          `last_name.ilike.${wildcardPattern},` +
+          `tracking_code.ilike.${wildcardPattern},` +
+          `batch_id.ilike.${wildcardPattern}`
+        );
+      }
+      // Handle multiple terms (name searches)
+      else if (searchTerms.length > 1) {
+        const firstName = searchTerms[0];
+        const lastName = searchTerms.slice(1).join(' ');
         
-        let statusColor = 'green';
-        if (tracking.status === 'Actie nodig') statusColor = 'red';
-        else if (tracking.status === 'Gemonitord') statusColor = 'orange';
-        else if (tracking.status === 'Waarschuwing') statusColor = 'yellow';
+        // Enhanced name matching with fuzzy support
+        query = query.or(
+          `and(first_name.ilike.%${firstName}%,last_name.ilike.%${lastName}%),` +
+          `and(first_name.ilike.${firstName}%,last_name.ilike.${lastName}%),` + // starts with
+          `email.ilike.%${search}%,` +
+          `tracking_code.ilike.%${search}%`
+        );
+      } 
+      // Single term search with enhanced patterns
+      else {
+        const searchTerm = searchTerms[0];
+        let searchConditions = [
+          `email.ilike.%${searchTerm}%`,
+          `first_name.ilike.%${searchTerm}%`,
+          `last_name.ilike.%${searchTerm}%`,
+          `tracking_code.ilike.%${searchTerm}%`,
+          `batch_id.ilike.%${searchTerm}%`
+        ];
         
-        let dhlInfo: DHLInfo | null = null;
-        if (!skipDhlScraping && tracking.is_active) {
-          try {
-            const scrapeResult = await scrapeDHL(tracking.tracking_code);
-            dhlInfo = {
-              afleverMoment: scrapeResult.afleverMoment,
-              afgegevenMoment: scrapeResult.afgegevenMoment,
-              duration: scrapeResult.duration,
-              durationDays: scrapeResult.durationDays,
-              deliveryStatus: scrapeResult.deliveryStatus,
-              statusTabel: scrapeResult.statusTabel,
-            };
-          } catch (scrapeError) {
-            console.error(`Scraping failed for ${tracking.tracking_code}:`, scrapeError);
-          }
-        } else {
-            dhlInfo = {
-                afleverMoment: tracking.aflever_moment ? new Date(tracking.aflever_moment).toLocaleString('nl-NL') : null,
-                afgegevenMoment: tracking.afgegeven_moment ? new Date(tracking.afgegeven_moment).toLocaleString('nl-NL') : null,
-                duration: tracking.duration || 'Onbekend',
-                durationDays: tracking.duration_days,
-                deliveryStatus: tracking.delivery_status || 'onbekend',
-                statusTabel: [],
-            }
+        // If it looks like an order ID, add exact match
+        if (!isNaN(parseInt(searchTerm))) {
+          searchConditions.push(`order_id.eq.${parseInt(searchTerm)}`);
         }
         
-        return {
+        // If it looks like a tracking code pattern, add starts-with match
+        if (searchTerm.match(/^[A-Z0-9]{2,}$/i)) {
+          searchConditions.push(`tracking_code.ilike.${searchTerm}%`);
+        }
+        
+        query = query.or(searchConditions.join(','));
+      }
+    }
+
+    const { data: trackings, error } = await query.range(offset, offset + limit - 1);
+
+    if (error) {
+      throw error;
+    }
+
+    // Functie voor gebruiksvriendelijke tijd weergave
+    const formatTimeUnderweg = (startMoment: Date, endMoment: Date): string => {
+      const totalMinutes = Math.floor((endMoment.getTime() - startMoment.getTime()) / (1000 * 60));
+      const totalHours = Math.floor(totalMinutes / 60);
+      const totalDays = Math.floor(totalHours / 24);
+      
+      if (totalHours < 6) {
+        return `${totalHours} uur onderweg`;
+      } else if (totalHours < 24) {
+        return `${totalHours} uur onderweg`;
+      } else if (totalDays <= 2) {
+        const remainingHours = totalHours % 24;
+        if (remainingHours === 0) {
+          return `${totalDays} ${totalDays === 1 ? 'dag' : 'dagen'} onderweg`;
+        } else {
+          return `${totalDays} ${totalDays === 1 ? 'dag' : 'dagen'} ${remainingHours} uur onderweg`;
+        }
+      } else {
+        return `${totalDays} dagen onderweg`;
+      }
+    };
+
+    // Voor elke tracking, haal de laatste logs op en bereken informatie
+    const enrichedTrackings = await Promise.all(
+      trackings?.map(async (tracking, index) => {
+        const today = new Date();
+        const verzendMoment = new Date(tracking.created_at);
+        
+        // Haal laatste logs op voor deze tracking (eerst declareren voor gebruik)
+        const { data: logs } = await supabase
+          .from('tracking_logs')
+          .select('action_type, created_at, details')
+          .eq('tracking_code', tracking.tracking_code)
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        // FIX: Stop met tellen als pakket bezorgd is
+        const packageDelivered = tracking.delivery_status === 'bezorgd' || 
+          logs?.some(log => log.action_type === 'customer_choice' && log.details?.keuze === 'ontvangen');
+        const eindMoment = packageDelivered && tracking.aflever_moment ? 
+          new Date(tracking.aflever_moment) : today;
+        
+        // Nieuwe gebruiksvriendelijke tijd berekening
+        const tijdOnderweg = formatTimeUnderweg(verzendMoment, eindMoment);
+        const dagenOnderwegNumber = Math.floor((eindMoment.getTime() - verzendMoment.getTime()) / (1000 * 60 * 60 * 24));
+
+        // OPTIMIZED: Use stored duration information from database - ONLY scrape when explicitly requested
+        let dhlInfo = null;
+        
+        // Always try to use stored duration data from database first
+        if (tracking.duration || tracking.aflever_moment || tracking.afgegeven_moment || tracking.delivery_status) {
+          dhlInfo = {
+            deliveryStatus: tracking.delivery_status || 'onderweg',
+            afleverMoment: tracking.aflever_moment ? new Date(tracking.aflever_moment) : null,
+            afgegevenMoment: tracking.afgegeven_moment ? new Date(tracking.afgegeven_moment) : null,
+            duration: tracking.duration || (tracking.delivery_status === 'bezorgd' ? 'Onbekende doorlooptijd (bezorgd)' : 'Nog onderweg'),
+            durationDays: tracking.duration_days || undefined,
+            statusTabel: []
+          };
+        }
+        
+        // Only scrape when explicitly requested (skipDhlScraping = false) AND conditions are met
+        if (!dhlInfo && !skipDhlScraping) {
+          // Check if recently scraped (within last hour) to avoid unnecessary scraping
+          const lastScraped = tracking.last_scraped_at ? new Date(tracking.last_scraped_at) : null;
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+          const wasRecentlyScraped = lastScraped && lastScraped > oneHourAgo;
+          
+          try {
+            // STRICT CONDITIONS: Only scrape if active, not delivered, and not recently scraped
+            if (tracking.is_active && 
+                tracking.delivery_status !== 'bezorgd' && 
+                !wasRecentlyScraped) {
+              
+              console.log(`🔄 Scraping ${tracking.tracking_code} (last scraped: ${lastScraped ? lastScraped.toLocaleString() : 'never'})`);
+              dhlInfo = await scrapeDHL(tracking.tracking_code);
+              
+              // Update database with fresh scraping result
+              if (dhlInfo && dhlInfo.deliveryStatus !== 'fout') {
+                const updateData: any = {
+                  delivery_status: dhlInfo.deliveryStatus,
+                  last_scraped_at: new Date().toISOString(),
+                  is_active: dhlInfo.deliveryStatus !== 'bezorgd'
+                };
+                
+                if (dhlInfo.afleverMoment) updateData.aflever_moment = dhlInfo.afleverMoment.toISOString();
+                if (dhlInfo.afgegevenMoment) updateData.afgegeven_moment = dhlInfo.afgegevenMoment.toISOString();
+                if (dhlInfo.duration) updateData.duration = dhlInfo.duration;
+                if (dhlInfo.durationDays) updateData.duration_days = dhlInfo.durationDays;
+                
+                await supabase
+                  .from('tracking_matches')
+                  .update(updateData)
+                  .eq('tracking_code', tracking.tracking_code);
+              }
+            } else {
+              // Skip scraping with reason
+              const skipReason = tracking.delivery_status === 'bezorgd' ? 'already delivered' :
+                               !tracking.is_active ? 'inactive' :
+                               wasRecentlyScraped ? `recently scraped (${lastScraped?.toLocaleTimeString()})` : 'unknown';
+              console.log(`⏭️ Skipping scrape for ${tracking.tracking_code}: ${skipReason}`);
+            }
+          } catch (error) {
+            console.error(`❌ Error scraping DHL for ${tracking.tracking_code}:`, error);
+            dhlInfo = {
+              deliveryStatus: 'fout',
+              afleverMoment: null,
+              afgegevenMoment: null,
+              duration: 'Kan niet bepaald worden (scraping fout)',
+              durationDays: undefined,
+              statusTabel: []
+            };
+          }
+        }
+        
+        // Fallback for no duration info available
+        if (!dhlInfo) {
+          dhlInfo = {
+            deliveryStatus: tracking.delivery_status || 'onderweg',
+            afleverMoment: null,
+            afgegevenMoment: null,
+            duration: tracking.delivery_status === 'bezorgd' ? 'Onbekende doorlooptijd (bezorgd)' : 'Data ophalen...',
+            durationDays: undefined,
+            statusTabel: []
+          };
+        }
+
+        // FIX: Bepaal status - PRIORITEIT aan echte DHL status
+        let status = 'OK';
+        let statusColor = 'green';
+        let lastAction = 'Geen actie';
+        let needsAction = false;
+
+        // PRIORITEIT 1: Gebruik echte DHL status als beschikbaar
+        if (dhlInfo && dhlInfo.deliveryStatus && dhlInfo.deliveryStatus !== 'fout') {
+          switch (dhlInfo.deliveryStatus) {
+            case 'bezorgd':
+              status = 'Bezorgd';
+              statusColor = 'green';
+              needsAction = false;
+              lastAction = 'Pakket bezorgd';
+              break;
+            case 'onderweg':
+              status = 'Onderweg';
+              statusColor = 'blue';
+              needsAction = dagenOnderwegNumber >= timingSettings.day_5_timing;
+              lastAction = 'In transport bij DHL';
+              break;
+            case 'verwerkt':
+              status = 'Wacht op ophaling';
+              statusColor = 'yellow';
+              needsAction = dagenOnderwegNumber >= timingSettings.day_3_timing;
+              lastAction = 'Wacht op DHL ophaling';
+              break;
+            case 'niet gevonden':
+              status = 'Niet gevonden';
+              statusColor = 'red';
+              needsAction = true;
+              lastAction = 'Tracking niet gevonden';
+              break;
+            default:
+              status = 'Onbekend';
+              statusColor = 'gray';
+              needsAction = true;
+              lastAction = 'Status onbekend';
+          }
+        } else {
+          // PRIORITEIT 2: Email/customer action logs
+          if (logs && logs.length > 0) {
+            const latestLog = logs[0];
+            
+            switch (latestLog.action_type) {
+              case 'heads_up_sent':
+                lastAction = `Dag ${timingSettings.day_3_timing} email verzonden`;
+                status = dagenOnderwegNumber >= timingSettings.day_5_timing ? 'Actie nodig' : 'Gemonitord';
+                statusColor = dagenOnderwegNumber >= timingSettings.day_5_timing ? 'orange' : 'blue';
+                needsAction = dagenOnderwegNumber >= timingSettings.day_5_timing;
+                break;
+              case 'choice_sent':
+                lastAction = `Dag ${timingSettings.day_5_timing} keuze email verzonden`;
+                status = 'Wacht op reactie';
+                statusColor = 'blue';
+                needsAction = dagenOnderwegNumber >= timingSettings.day_10_timing;
+                break;
+              case 'gift_notice_sent':
+                lastAction = `Dag ${timingSettings.day_10_timing} compensatie verzonden`;
+                status = 'Afgehandeld';
+                statusColor = 'green';
+                needsAction = false;
+                break;
+              case 'customer_choice':
+                const choice = latestLog.details?.keuze;
+                lastAction = `Klant koos: ${choice}`;
+                status = 'Klant gereageerd';
+                statusColor = 'green';
+                needsAction = false;
+                break;
+              case 'processing_error':
+                lastAction = 'Error';
+                status = 'Fout';
+                statusColor = 'red';
+                needsAction = true;
+                break;
+            }
+          } else {
+            // PRIORITEIT 3: Fallback - geen logs, bepaal op basis van dagen en timing settings
+            if (dagenOnderwegNumber >= timingSettings.day_10_timing) {
+              status = `Actie nodig (Dag ${timingSettings.day_10_timing})`;
+              statusColor = 'red';
+              needsAction = true;
+            } else if (dagenOnderwegNumber >= timingSettings.day_5_timing) {
+              status = `Actie nodig (Dag ${timingSettings.day_5_timing})`;
+              statusColor = 'orange';
+              needsAction = true;
+            } else if (dagenOnderwegNumber >= timingSettings.day_3_timing) {
+              status = `Actie nodig (Dag ${timingSettings.day_3_timing})`;
+              statusColor = 'yellow';
+              needsAction = true;
+            }
+          }
+        }
+
+        // Bepaal of tracking als "afgeleverd" moet worden gemarkeerd
+        const isTrackingComplete = tracking.delivery_status === 'bezorgd' || 
+          logs?.some(log => log.action_type === 'customer_choice' && log.details?.keuze === 'ontvangen');
+
+        const enrichedTracking = {
           id: tracking.id,
-          rowNumber: startIndex + index + 1,
+          rowNumber: offset + index + 1,
           trackingCode: tracking.tracking_code,
-          customerName: tracking.customerName,
+          customerName: `${tracking.first_name} ${tracking.last_name}`.trim(),
           email: tracking.email,
           orderId: tracking.order_id,
-          dagenOnderweg: tracking.dagenOnderweg,
+          dagenOnderweg: dagenOnderwegNumber,
           tijdOnderweg,
-          status: tracking.status,
+          status,
           statusColor,
-          lastAction: 'N/A', 
+          lastAction,
           verzendDatum: verzendMoment.toLocaleDateString('nl-NL'),
           verzendTime: verzendMoment.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
-          isActive: tracking.is_active,
-          deliveryStatus: dhlInfo?.deliveryStatus || tracking.delivery_status || 'onbekend',
-          needsAction: tracking.needs_action,
-          logs: [], // Logs worden niet meer per stuk opgehaald voor performance
+          isActive: tracking.is_active && !isTrackingComplete,
+          deliveryStatus: dhlInfo?.deliveryStatus || tracking.delivery_status,
+          needsAction,
+          logs: logs || [],
           batchId: tracking.batch_id,
           matchedFrom: tracking.matched_from,
-          lastStatusCheck: new Date(tracking.last_status_check).toLocaleString('nl-NL'),
-          dhlInfo: dhlInfo,
+          lastStatusCheck: tracking.last_status_check ? new Date(tracking.last_status_check).toLocaleDateString('nl-NL') : 'Nooit',
+          // DHL scraping informatie
+          dhlInfo: dhlInfo ? {
+            afleverMoment: dhlInfo.afleverMoment ? dhlInfo.afleverMoment.toLocaleString('nl-NL', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            }) : null,
+            afgegevenMoment: dhlInfo.afgegevenMoment ? dhlInfo.afgegevenMoment.toLocaleString('nl-NL', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            }) : null,
+            duration: dhlInfo.duration,
+            durationDays: dhlInfo.durationDays,
+            deliveryStatus: dhlInfo.deliveryStatus,
+            statusTabel: dhlInfo.statusTabel
+          } : null
         };
-      })
+
+        return enrichedTracking;
+      }) || []
     );
-    
-    // Voor accurate paginatie tellen we *alleen* de records die aan de DB-query voldoen.
-    // De JS-filtering maakt dit onnauwkeurig, maar dat is een bewuste trade-off.
-    // We gebruiken de lengte van de *gefilterde* array voor de UI.
-    const totalFiltered = filteredTrackings.length;
-    
-    // Bereken statistieken op basis van de gefilterde data
-    const activeCount = filteredTrackings.filter(t => t.is_active).length;
-    const needsActionCount = filteredTrackings.filter(t => t.needs_action).length;
+
+    // Filter on status only (days are now filtered at database level)
+    const filteredTrackings = enrichedTrackings.filter(t => {
+      return statusFilter === '' || t.status.toLowerCase().includes(statusFilter.toLowerCase());
+    });
+
+    // Voor accurate paginatie tellen we met dezelfde filters
+    let countQuery = supabase
+      .from('tracking_matches')
+      .select('id', { count: 'exact', head: true });
+
+    if (filterActive) {
+      countQuery = countQuery.eq('is_active', true).neq('delivery_status', 'bezorgd');
+    }
+
+    if (deliveryStatusFilter) {
+      countQuery = countQuery.eq('delivery_status', deliveryStatusFilter);
+    }
+
+    if (batchIdFilter) {
+      countQuery = countQuery.ilike('batch_id', `%${batchIdFilter}%`);
+    }
+
+    // Days filter for count query too
+    if (daysMin > 0 || daysMax < 999) {
+      const now = new Date();
+      if (daysMax < 999) {
+        const daysMaxDate = new Date(now.getTime() - daysMax * 24 * 60 * 60 * 1000);
+        countQuery = countQuery.gte('created_at', daysMaxDate.toISOString());
+      }
+      if (daysMin > 0) {
+        const daysMinDate = new Date(now.getTime() - daysMin * 24 * 60 * 60 * 1000);
+        countQuery = countQuery.lte('created_at', daysMinDate.toISOString());
+      }
+    }
+
+    if (search) {
+      countQuery = countQuery.or(
+        `email.ilike.%${search}%,` +
+        `first_name.ilike.%${search}%,` +
+        `last_name.ilike.%${search}%,` +
+        `tracking_code.ilike.%${search}%,` +
+        `order_id.eq.${isNaN(parseInt(search)) ? 0 : parseInt(search)},` +
+        `batch_id.ilike.%${search}%`
+      );
+    }
+
+    const { count } = await countQuery;
+
+    // Bereken statistieken
+    const activeCount = filteredTrackings.filter(t => t.isActive).length;
+    const needsActionCount = filteredTrackings.filter(t => t.needsAction && t.isActive).length;
 
     // Bereken duration statistieken
     const trackingsWithDuration = filteredTrackings.filter(t => t.dhlInfo?.durationDays);
@@ -231,19 +489,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Database paginering is al toegepast via .range(), geen extra JavaScript paginering nodig
     res.status(200).json({
-      trackings: finalTrackings,
+      trackings: filteredTrackings,
       pagination: {
         page,
         limit,
-        total: count || 0, // Totaal zonder JS filters
-        pages: Math.ceil((count || 0) / limit), // Paginatie gebaseerd op totaal zonder JS filters
-        showing: finalTrackings.length,
-        filteredTotal: totalFiltered, // Totaal *met* JS filters
+        total: count || 0,
+        pages: Math.ceil((count || 0) / limit),
+        showing: filteredTrackings.length,
+        filteredTotal: filteredTrackings.length
       },
       stats: {
+        totalActive: activeCount,
+        needsAction: needsActionCount,
+        timingSettings,
         totalRecords: count || 0,
-        // Stats worden nu complexer door de JS-filtering, voor nu laten we dit simpeler
-        statusBreakdown: {}, 
+        statusBreakdown: {
+          actief: filteredTrackings.filter(t => t.isActive).length,
+          inactief: filteredTrackings.filter(t => !t.isActive).length,
+          bezorgd: filteredTrackings.filter(t => t.deliveryStatus === 'bezorgd').length,
+          onderweg: filteredTrackings.filter(t => t.deliveryStatus === 'onderweg').length,
+          errors: filteredTrackings.filter(t => t.status === 'Fout').length
+        },
         durationStats: {
           trackingsWithDuration: trackingsWithDuration.length,
           avgDuration: Number(avgDuration.toFixed(1)),
@@ -251,9 +517,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           completedTrackings: completedTrackings.length,
           avgCompletedDuration: Number(avgCompletedDuration.toFixed(1)),
           avgCompletedDurationFormatted: avgCompletedDuration > 0 ? `${avgCompletedDuration.toFixed(1)} dagen` : 'Geen data'
-        },
-        needsAction: needsActionCount,
-        timingSettings: timingSettings
+        }
       },
       filters: {
         active: filterActive,

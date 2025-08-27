@@ -50,6 +50,7 @@ interface Filters {
   daysMin: number;
   daysMax: number;
   active: boolean;
+  batchId?: string;
 }
 
 export default function TrackingDashboard() {
@@ -80,23 +81,25 @@ export default function TrackingDashboard() {
     daysMax: 999,
     active: true
   });
-
-  // aparte state voor de inputvelden, om de UX te verbeteren
-  const [dayFilters, setDayFilters] = useState({
-    min: '0',
-    max: '999'
+  
+  // Enhanced search features
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
+  const [savedSearches, setSavedSearches] = useState<Array<{name: string, filters: Filters}>>([]);
+  
+  // Additional filter states
+  const [dateFilters, setDateFilters] = useState({
+    shipDateFrom: '',
+    shipDateTo: '',
+    deliveryDateFrom: '',
+    deliveryDateTo: '',
+    lastActionFrom: '',
+    lastActionTo: ''
   });
-
-  useEffect(() => {
-    // Sync de inputvelden met de hoofd filter state.
-    // Dit zorgt ervoor dat de UI consistent is, bijv. na een reset.
-    setDayFilters({
-      min: String(filters.daysMin),
-      max: String(filters.daysMax),
-    });
-  }, [filters.daysMin, filters.daysMax]);
   
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showDateFilters, setShowDateFilters] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   
   // Selection state for bulk operations
@@ -131,6 +134,7 @@ export default function TrackingDashboard() {
         deliveryStatus: currentFilters.deliveryStatus,
         daysMin: currentFilters.daysMin.toString(),
         daysMax: currentFilters.daysMax.toString(),
+        batchId: currentFilters.batchId || '',
         skipDhl: skipDhl.toString() // OPTIMIZED: Skip DHL scraping by default for fast loading
       });
 
@@ -151,8 +155,57 @@ export default function TrackingDashboard() {
     }
   };
 
+  // Debounced search effect - ONLY for search term changes
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (searchTerm.length >= 2 || searchTerm.length === 0) {
+        // Only trigger search if search term actually changed from current filters
+        if (searchTerm !== filters.search) {
+          setFilters(prev => ({ ...prev, search: searchTerm }));
+          fetchTrackings(1, { ...filters, search: searchTerm }, true);
+          
+          // Add to search history when search is executed
+          if (searchTerm.length >= 2) {
+            addToSearchHistory(searchTerm);
+          }
+        }
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // Sync searchTerm with filters.search when changed externally (saved searches, etc.)
+  useEffect(() => {
+    if (filters.search !== searchTerm) {
+      setSearchTerm(filters.search);
+    }
+  }, [filters.search]);
+
   useEffect(() => {
     fetchTrackings(pagination.page);
+    
+    // Load saved searches and history from localStorage
+    const saved = localStorage.getItem('tracking-saved-searches');
+    const history = localStorage.getItem('tracking-search-history');
+    
+    if (saved) {
+      try {
+        setSavedSearches(JSON.parse(saved));
+      } catch (error) {
+        console.error('Error loading saved searches:', error);
+      }
+    }
+    
+    if (history) {
+      try {
+        setSearchHistory(JSON.parse(history));
+      } catch (error) {
+        console.error('Error loading search history:', error);
+      }
+    }
   }, []);
 
   const handlePageChange = (newPage: number) => {
@@ -163,26 +216,245 @@ export default function TrackingDashboard() {
   const handleFilterChange = (newFilters: Partial<Filters>) => {
     const updatedFilters = { ...filters, ...newFilters };
     setFilters(updatedFilters);
-    fetchTrackings(1, updatedFilters, true); // Skip DHL for filter changes
+    
+    // Always trigger search for non-search filter changes
+    if (!newFilters.hasOwnProperty('search')) {
+      fetchTrackings(1, updatedFilters, true); // Skip DHL for filter changes
+    } else {
+      // For search changes, also update searchTerm to keep them in sync
+      if (newFilters.search !== undefined) {
+        setSearchTerm(newFilters.search);
+      }
+    }
   };
 
-  const handleDayFilterChange = (type: 'min' | 'max', value: string) => {
-    // Update de lokale state direct voor een responsieve UI
-    setDayFilters(prev => ({ ...prev, [type]: value }));
-  
-    // Debounce de daadwerkelijke filter-actie
-    setTimeout(() => {
-      const numericValue = parseInt(value, 10);
-      const isMin = type === 'min';
-  
-      if (isNaN(numericValue)) {
-        // Als het veld leeg is of geen nummer, reset naar default
-        handleFilterChange({ [isMin ? 'daysMin' : 'daysMax']: isMin ? 0 : 999 });
-      } else {
-        // Anders, gebruik de ingevoerde waarde
-        handleFilterChange({ [isMin ? 'daysMin' : 'daysMax']: numericValue });
+  // Enhanced search functionality
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value); // Use the new searchTerm state instead
+    
+    // Generate suggestions based on search history and current data
+    if (value.length >= 1) {
+      const suggestions = searchHistory
+        .filter(term => term.toLowerCase().includes(value.toLowerCase()) && term !== value)
+        .slice(0, 5);
+      
+      // Add common patterns
+      if (value.match(/^\d+$/)) {
+        suggestions.unshift(`Order ${value}*`);
       }
-    }, 500); // 500ms delay
+      if (value.match(/^[A-Z0-9]+$/i)) {
+        suggestions.unshift(`Tracking ${value}*`);
+      }
+      
+      setSearchSuggestions(suggestions);
+      setShowSearchSuggestions(suggestions.length > 0);
+    } else {
+      setShowSearchSuggestions(false);
+    }
+  };
+
+  const selectSearchSuggestion = (suggestion: string) => {
+    const cleanSuggestion = suggestion.replace(/^(Order|Tracking)\s/, '').replace(/\*$/, '');
+    setSearchTerm(cleanSuggestion);
+    setFilters(prev => ({ ...prev, search: cleanSuggestion }));
+    setShowSearchSuggestions(false);
+    
+    // Add to search history
+    addToSearchHistory(cleanSuggestion);
+  };
+
+  const addToSearchHistory = (searchTerm: string) => {
+    if (searchTerm.trim() && !searchHistory.includes(searchTerm)) {
+      const newHistory = [searchTerm, ...searchHistory.slice(0, 9)]; // Keep last 10
+      setSearchHistory(newHistory);
+      localStorage.setItem('tracking-search-history', JSON.stringify(newHistory));
+    }
+  };
+
+  // Quick filter presets - UPDATED for database compatibility
+  const applyQuickFilter = (preset: string) => {
+    let newFilters: Partial<Filters> = {};
+    
+    switch (preset) {
+      case 'problem-packages':
+        // Packages that might have issues (long transit + active)
+        newFilters = {
+          active: true,
+          daysMin: 7,
+          daysMax: 999,
+          deliveryStatus: 'onderweg'
+        };
+        break;
+      case 'recent-deliveries':
+        // Recently delivered packages
+        newFilters = {
+          deliveryStatus: 'bezorgd',
+          active: false,
+          daysMin: 0,
+          daysMax: 7
+        };
+        break;
+      case 'long-transit':
+        // Packages taking too long
+        newFilters = {
+          active: true,
+          daysMin: 10,
+          daysMax: 999,
+          deliveryStatus: 'onderweg'
+        };
+        break;
+      case 'awaiting-pickup':
+        // Packages waiting for DHL pickup
+        newFilters = {
+          active: true,
+          deliveryStatus: 'verwerkt',
+          daysMin: 2,
+          daysMax: 999
+        };
+        break;
+      case 'not-found':
+        // Tracking codes not found
+        newFilters = {
+          deliveryStatus: 'niet gevonden',
+          active: true
+        };
+        break;
+      case 'fresh-packages':
+        // Recently shipped packages
+        newFilters = {
+          active: true,
+          daysMin: 0,
+          daysMax: 3,
+          deliveryStatus: 'onderweg'
+        };
+        break;
+      default:
+        return;
+    }
+    
+    const updatedFilters = { ...filters, ...newFilters };
+    
+    // Clear search term if it's not being explicitly set
+    if (!newFilters.hasOwnProperty('search')) {
+      setSearchTerm('');
+      updatedFilters.search = '';
+    }
+    
+    setFilters(updatedFilters);
+    fetchTrackings(1, updatedFilters, true);
+  };
+
+  // Save search functionality
+  const saveCurrentSearch = () => {
+    const name = prompt('Geef een naam voor deze zoekactie:');
+    if (name && name.trim()) {
+      const newSavedSearch = { name: name.trim(), filters: { ...filters } };
+      const updated = [...savedSearches, newSavedSearch];
+      setSavedSearches(updated);
+      localStorage.setItem('tracking-saved-searches', JSON.stringify(updated));
+    }
+  };
+
+  const loadSavedSearch = (savedSearch: {name: string, filters: Filters}) => {
+    setFilters(savedSearch.filters);
+    fetchTrackings(1, savedSearch.filters, true);
+  };
+
+  const deleteSavedSearch = (index: number) => {
+    const updated = savedSearches.filter((_, i) => i !== index);
+    setSavedSearches(updated);
+    localStorage.setItem('tracking-saved-searches', JSON.stringify(updated));
+  };
+
+  // Export functionality
+  const exportToCSV = () => {
+    const headers = [
+      'Tracking Code',
+      'Klant Naam',
+      'Email',
+      'Order ID',
+      'Dagen Onderweg',
+      'Status',
+      'Delivery Status',
+      'Doorlooptijd',
+      'Verzend Datum',
+      'Last Action',
+      'Batch ID'
+    ];
+
+    const csvData = trackings.map(tracking => [
+      tracking.trackingCode,
+      tracking.customerName,
+      tracking.email,
+      tracking.orderId,
+      tracking.dagenOnderweg,
+      tracking.status,
+      tracking.deliveryStatus,
+      tracking.dhlInfo?.duration || 'Onbekend',
+      tracking.verzendDatum,
+      tracking.lastAction,
+      tracking.batchId
+    ]);
+
+    const csvContent = [headers, ...csvData]
+      .map(row => row.map(field => `"${field}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `tracking-export-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Enhanced tracking code filter with pattern matching
+  const handleTrackingCodeFilter = (pattern: string) => {
+    let searchPattern = pattern;
+    
+    // Support wildcards
+    if (pattern.includes('*')) {
+      searchPattern = pattern.replace(/\*/g, '');
+    }
+    
+    // Support partial matching for tracking codes
+    if (pattern.match(/^[A-Z0-9]{2,}$/i)) {
+      searchPattern = pattern;
+    }
+    
+    setFilters(prev => ({ ...prev, search: searchPattern }));
+  };
+
+  // Bulk operations
+  const handleBulkStatusUpdate = async (newStatus: string) => {
+    if (selectedTrackings.size === 0) return;
+    
+    const confirmed = confirm(`Weet je zeker dat je de status van ${selectedTrackings.size} tracking(s) wilt wijzigen naar "${newStatus}"?`);
+    if (!confirmed) return;
+
+    try {
+      const trackingCodes = Array.from(selectedTrackings);
+      const response = await fetch('/api/admin/bulk-status-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackingCodes, status: newStatus })
+      });
+      
+      if (response.ok) {
+        alert('Status succesvol bijgewerkt!');
+        setSelectedTrackings(new Set());
+        setSelectAll(false);
+        fetchTrackings(pagination.page, filters, true);
+      } else {
+        alert('Fout bij het bijwerken van de status');
+      }
+    } catch (error) {
+      console.error('Error updating bulk status:', error);
+      alert('Fout bij het bijwerken van de status');
+    }
   };
 
   // Manual refresh function for getting fresh DHL data with queue system
@@ -343,12 +615,8 @@ export default function TrackingDashboard() {
       daysMax: 999,
       active: true
     };
+    setSearchTerm(''); // Reset search term too
     setFilters(defaultFilters);
-    // Reset ook de visuele input state
-    setDayFilters({
-      min: '0',
-      max: '999'
-    });
     fetchTrackings(1, defaultFilters, true); // Skip DHL for reset
   };
 
@@ -673,25 +941,144 @@ export default function TrackingDashboard() {
           </div>
         </div>
 
-        {/* Search and Filter Controls */}
+        {/* Enhanced Search and Filter Controls */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+          {/* Quick Filter Presets */}
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-700 mb-3">🚀 Snelle Filters</h3>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => applyQuickFilter('problem-packages')}
+                className="px-3 py-1 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors text-sm"
+              >
+                🚨 Probleem Pakketten (7+ dagen)
+              </button>
+              <button
+                onClick={() => applyQuickFilter('long-transit')}
+                className="px-3 py-1 bg-orange-100 text-orange-700 rounded-md hover:bg-orange-200 transition-colors text-sm"
+              >
+                🐌 Lange Transit (10+ dagen)
+              </button>
+              <button
+                onClick={() => applyQuickFilter('awaiting-pickup')}
+                className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-md hover:bg-yellow-200 transition-colors text-sm"
+              >
+                📦 Wacht op Ophaling
+              </button>
+              <button
+                onClick={() => applyQuickFilter('not-found')}
+                className="px-3 py-1 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors text-sm"
+              >
+                ❓ Niet Gevonden
+              </button>
+              <button
+                onClick={() => applyQuickFilter('fresh-packages')}
+                className="px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors text-sm"
+              >
+                🆕 Vers Verzonden (0-3 dagen)
+              </button>
+              <button
+                onClick={() => applyQuickFilter('recent-deliveries')}
+                className="px-3 py-1 bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors text-sm"
+              >
+                ✅ Recent Bezorgd
+              </button>
+            </div>
+          </div>
+
+          {/* Saved Searches */}
+          {savedSearches.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-gray-700 mb-3">💾 Opgeslagen Zoekopdrachten</h3>
+              <div className="flex flex-wrap gap-2">
+                {savedSearches.map((saved, index) => (
+                  <div key={index} className="flex items-center gap-1 bg-purple-100 rounded-md">
+                    <button
+                      onClick={() => loadSavedSearch(saved)}
+                      className="px-3 py-1 text-purple-700 hover:bg-purple-200 transition-colors text-sm rounded-l-md"
+                    >
+                      {saved.name}
+                    </button>
+                    <button
+                      onClick={() => deleteSavedSearch(index)}
+                      className="px-2 py-1 text-purple-500 hover:text-purple-700 text-sm"
+                      title="Verwijder opgeslagen zoekopdracht"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col lg:flex-row gap-4 mb-4">
-            {/* Search */}
-            <div className="flex-1">
+            {/* Enhanced Search with Suggestions */}
+            <div className="flex-1 relative">
               <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
-                🔍 Zoeken
+                🔍 Geavanceerd Zoeken
               </label>
-              <input
-                type="text"
-                id="search"
-                placeholder="Zoek op email, tracking code, order ID, naam..."
-                value={filters.search}
-                onChange={(e) => handleFilterChange({ search: e.target.value })}
-                className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  id="search"
+                  placeholder="Zoek op email, tracking code, order ID, naam... (gebruik * voor wildcards)"
+                  value={searchTerm}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onFocus={() => {
+                    if (searchSuggestions.length > 0) setShowSearchSuggestions(true);
+                  }}
+                  onBlur={() => {
+                    // Delay to allow suggestion click
+                    setTimeout(() => setShowSearchSuggestions(false), 200);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      // Trigger search immediately on Enter
+                      setFilters(prev => ({ ...prev, search: searchTerm }));
+                      fetchTrackings(1, { ...filters, search: searchTerm }, true);
+                      if (searchTerm.length >= 2) {
+                        addToSearchHistory(searchTerm);
+                      }
+                    }
+                  }}
+                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 pr-10"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => {
+                      setSearchTerm('');
+                      setFilters(prev => ({ ...prev, search: '' }));
+                      setShowSearchSuggestions(false);
+                    }}
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                )}
+                
+                {/* Search Suggestions Dropdown */}
+                {showSearchSuggestions && (
+                  <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-md shadow-lg z-10 mt-1">
+                    {searchSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        onClick={() => selectSearchSuggestion(suggestion)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-100 first:rounded-t-md last:rounded-b-md text-sm"
+                      >
+                        {suggestion.includes('*') ? (
+                          <span className="text-blue-600">📋 {suggestion}</span>
+                        ) : (
+                          <span className="text-gray-700">🔍 {suggestion}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Quick Filters */}
+            {/* Action Buttons */}
             <div className="flex gap-2 items-end">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
@@ -706,10 +1093,33 @@ export default function TrackingDashboard() {
               </div>
 
               <button
+                onClick={saveCurrentSearch}
+                className="px-4 py-2 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors"
+                title="Huidige zoekopdracht opslaan"
+              >
+                💾 Opslaan
+              </button>
+
+              <button
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                 className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
               >
                 {showAdvancedFilters ? '🔼 Minder filters' : '🔽 Meer filters'}
+              </button>
+
+              <button
+                onClick={() => setShowDateFilters(!showDateFilters)}
+                className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-md hover:bg-indigo-200 transition-colors"
+              >
+                📅 Datum filters
+              </button>
+
+              <button
+                onClick={exportToCSV}
+                className="px-4 py-2 bg-green-100 text-green-700 rounded-md hover:bg-green-200 transition-colors"
+                title="Exporteer huidige resultaten naar CSV"
+              >
+                📊 Export CSV
               </button>
 
               <button
@@ -719,102 +1129,309 @@ export default function TrackingDashboard() {
                 🗑️ Reset
               </button>
               
-                             <button
-                 onClick={refreshWithDHLData}
-                 disabled={loading || authLoading || queueProgress.isRunning}
-                 className="px-4 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                 title="Ververs alle DHL tracking data (wordt 1 voor 1 afgehandeld)"
-               >
-                 {loading || authLoading || queueProgress.isRunning ? '🔄' : '🚛'} DHL Refresh
-               </button>
+              <button
+                onClick={refreshWithDHLData}
+                disabled={loading || authLoading || queueProgress.isRunning}
+                className="px-4 py-2 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Ververs alle DHL tracking data (wordt 1 voor 1 afgehandeld)"
+              >
+                {loading || authLoading || queueProgress.isRunning ? '🔄' : '🚛'} DHL Refresh
+              </button>
             </div>
           </div>
 
           {/* Advanced Filters */}
           {showAdvancedFilters && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-gray-200">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Status</label>
-                <select
-                  value={filters.deliveryStatus}
-                  onChange={(e) => handleFilterChange({ deliveryStatus: e.target.value })}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            <div className="pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-700 mb-4">🔧 Geavanceerde Filters</h4>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Delivery Status</label>
+                  <select
+                    value={filters.deliveryStatus}
+                    onChange={(e) => handleFilterChange({ deliveryStatus: e.target.value })}
+                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  >
+                    <option value="">Alle statussen</option>
+                    <option value="onderweg">🚛 Onderweg</option>
+                    <option value="bezorgd">✅ Bezorgd</option>
+                    <option value="verwerkt">📦 Verwerkt (wacht op ophaling)</option>
+                    <option value="niet gevonden">❌ Niet gevonden</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Batch ID</label>
+                  <input
+                    type="text"
+                    placeholder="Filter op batch ID..."
+                    value={filters.batchId || ''}
+                    onChange={(e) => handleFilterChange({ batchId: e.target.value })}
+                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Min. dagen onderweg</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="365"
+                    value={filters.daysMin}
+                    onChange={(e) => handleFilterChange({ daysMin: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Max. dagen onderweg</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="365"
+                    value={filters.daysMax}
+                    onChange={(e) => handleFilterChange({ daysMax: parseInt(e.target.value) || 999 })}
+                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Date Filters */}
+          {showDateFilters && (
+            <div className="pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-700 mb-4">📅 Datum Filters</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <h5 className="text-xs font-medium text-gray-600">Verzend Datum</h5>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Van</label>
+                      <input
+                        type="date"
+                        value={dateFilters.shipDateFrom}
+                        onChange={(e) => setDateFilters(prev => ({ ...prev, shipDateFrom: e.target.value }))}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Tot</label>
+                      <input
+                        type="date"
+                        value={dateFilters.shipDateTo}
+                        onChange={(e) => setDateFilters(prev => ({ ...prev, shipDateTo: e.target.value }))}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h5 className="text-xs font-medium text-gray-600">Bezorg Datum</h5>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Van</label>
+                      <input
+                        type="date"
+                        value={dateFilters.deliveryDateFrom}
+                        onChange={(e) => setDateFilters(prev => ({ ...prev, deliveryDateFrom: e.target.value }))}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Tot</label>
+                      <input
+                        type="date"
+                        value={dateFilters.deliveryDateTo}
+                        onChange={(e) => setDateFilters(prev => ({ ...prev, deliveryDateTo: e.target.value }))}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h5 className="text-xs font-medium text-gray-600">Laatste Actie</h5>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Van</label>
+                      <input
+                        type="date"
+                        value={dateFilters.lastActionFrom}
+                        onChange={(e) => setDateFilters(prev => ({ ...prev, lastActionFrom: e.target.value }))}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Tot</label>
+                      <input
+                        type="date"
+                        value={dateFilters.lastActionTo}
+                        onChange={(e) => setDateFilters(prev => ({ ...prev, lastActionTo: e.target.value }))}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => {
+                    // Apply date filters by updating current filters
+                    const dateParams = new URLSearchParams();
+                    if (dateFilters.shipDateFrom) dateParams.set('shipDateFrom', dateFilters.shipDateFrom);
+                    if (dateFilters.shipDateTo) dateParams.set('shipDateTo', dateFilters.shipDateTo);
+                    if (dateFilters.deliveryDateFrom) dateParams.set('deliveryDateFrom', dateFilters.deliveryDateFrom);
+                    if (dateFilters.deliveryDateTo) dateParams.set('deliveryDateTo', dateFilters.deliveryDateTo);
+                    if (dateFilters.lastActionFrom) dateParams.set('lastActionFrom', dateFilters.lastActionFrom);
+                    if (dateFilters.lastActionTo) dateParams.set('lastActionTo', dateFilters.lastActionTo);
+                    
+                    // Note: For simplicity, we'll trigger a search - in production you'd extend the API
+                    fetchTrackings(1, filters, true);
+                    alert('Datum filters toegepast! (Opmerking: volledige datum filter implementatie vereist API uitbreiding)');
+                  }}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors text-sm"
                 >
-                  <option value="">Alle statussen</option>
-                  <option value="onderweg">Onderweg</option>
-                  <option value="bezorgd">Bezorgd</option>
-                  <option value="fout">Fout</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Action Status</label>
-                <select
-                  value={filters.status}
-                  onChange={(e) => handleFilterChange({ status: e.target.value })}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  Toepassen
+                </button>
+                <button
+                  onClick={() => {
+                    setDateFilters({
+                      shipDateFrom: '',
+                      shipDateTo: '',
+                      deliveryDateFrom: '',
+                      deliveryDateTo: '',
+                      lastActionFrom: '',
+                      lastActionTo: ''
+                    });
+                  }}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors text-sm"
                 >
-                  <option value="">Alle statussen</option>
-                  <option value="OK">OK</option>
-                  <option value="actie nodig">Actie nodig</option>
-                  <option value="gemonitord">Gemonitord</option>
-                  <option value="wacht">Wacht op reactie</option>
-                  <option value="afgehandeld">Afgehandeld</option>
-                  <option value="fout">Fout</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Min. dagen onderweg</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="365"
-                  value={dayFilters.min}
-                  onChange={(e) => handleDayFilterChange('min', e.target.value)}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Max. dagen onderweg</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="365"
-                  value={dayFilters.max}
-                  onChange={(e) => handleDayFilterChange('max', e.target.value)}
-                  className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                />
+                  Reset
+                </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Bulk Actions */}
+        {/* Enhanced Bulk Actions */}
         {selectedTrackings.size > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-blue-700 font-medium">
-                  {selectedTrackings.size} tracking{selectedTrackings.size > 1 ? 's' : ''} geselecteerd
-                </span>
-                <button
-                  onClick={() => {
-                    setSelectedTrackings(new Set());
-                    setSelectAll(false);
-                  }}
-                  className="text-blue-600 hover:text-blue-800 text-sm"
-                >
-                  Selectie wissen
-                </button>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-blue-700 font-medium">
+                    {selectedTrackings.size} tracking{selectedTrackings.size > 1 ? 's' : ''} geselecteerd
+                  </span>
+                  <button
+                    onClick={() => {
+                      setSelectedTrackings(new Set());
+                      setSelectAll(false);
+                    }}
+                    className="text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    Selectie wissen
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={exportToCSV}
+                    className="bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 flex items-center gap-1 text-sm"
+                  >
+                    📊 Export Selectie
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-2">
+
+              {/* Bulk Action Buttons */}
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleBulkScrape}
                   className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center gap-2"
                 >
                   🔄 Bulk Scrapen ({selectedTrackings.size})
+                </button>
+                
+                <div className="relative group">
+                  <button className="bg-orange-600 text-white px-4 py-2 rounded-md hover:bg-orange-700 flex items-center gap-2">
+                    📧 Bulk Email
+                  </button>
+                  <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-md shadow-lg z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => {
+                        // Implement bulk heads up email
+                        console.log('Sending bulk heads up emails to:', Array.from(selectedTrackings));
+                      }}
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+                    >
+                      📤 Heads Up Email
+                    </button>
+                    <button
+                      onClick={() => {
+                        // Implement bulk choice email
+                        console.log('Sending bulk choice emails to:', Array.from(selectedTrackings));
+                      }}
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+                    >
+                      🤔 Keuze Email
+                    </button>
+                  </div>
+                </div>
+
+                <div className="relative group">
+                  <button className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center gap-2">
+                    🏷️ Status Update
+                  </button>
+                  <div className="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-md shadow-lg z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => handleBulkStatusUpdate('gemonitord')}
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+                    >
+                      👁️ Gemonitord
+                    </button>
+                    <button
+                      onClick={() => handleBulkStatusUpdate('actie nodig')}
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+                    >
+                      ⚠️ Actie Nodig
+                    </button>
+                    <button
+                      onClick={() => handleBulkStatusUpdate('afgehandeld')}
+                      className="block w-full text-left px-4 py-2 hover:bg-gray-100 text-sm text-gray-700"
+                    >
+                      ✅ Afgehandeld
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    // Implement bulk deactivate
+                    const confirmed = confirm(`Weet je zeker dat je ${selectedTrackings.size} tracking(s) wilt deactiveren?`);
+                    if (confirmed) {
+                      console.log('Deactivating trackings:', Array.from(selectedTrackings));
+                      // Implement API call
+                    }
+                  }}
+                  className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 flex items-center gap-2"
+                >
+                  🚫 Deactiveren
+                </button>
+
+                <button
+                  onClick={() => {
+                    // Implement bulk add to batch
+                    const batchName = prompt('Voer batch naam in:');
+                    if (batchName) {
+                      console.log('Adding to batch:', batchName, Array.from(selectedTrackings));
+                      // Implement API call
+                    }
+                  }}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 flex items-center gap-2"
+                >
+                  📦 Toevoegen aan Batch
                 </button>
               </div>
             </div>
@@ -860,7 +1477,18 @@ export default function TrackingDashboard() {
                 ) : trackings.length === 0 ? (
                   <tr>
                     <td colSpan={12} className="px-6 py-4 text-center text-gray-500">
-                      Geen trackings gevonden met de huidige filters.
+                      <div className="py-8">
+                        <span className="text-4xl mb-4 block">📦</span>
+                        <p className="text-lg font-medium mb-2">Geen trackings gevonden</p>
+                        <p className="text-sm">
+                          Probeer de filters aan te passen of een andere zoekterm te gebruiken.
+                          {filters.daysMin >= 10 && (
+                            <span className="block mt-2 text-blue-600">
+                              💡 Tip: Er zijn momenteel geen pakketten die {filters.daysMin}+ dagen onderweg zijn.
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     </td>
                   </tr>
                 ) : (
