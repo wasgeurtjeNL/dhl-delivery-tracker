@@ -341,6 +341,11 @@ export default function TrackingDashboard() {
       active: true
     };
     setFilters(defaultFilters);
+    // Reset ook de visuele input state
+    setDayFilters({
+      min: '0',
+      max: '999'
+    });
     fetchTrackings(1, defaultFilters, true); // Skip DHL for reset
   };
 
