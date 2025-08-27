@@ -366,7 +366,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Filter op dagen onderweg (na enrichment omdat we de berekende waarde nodig hebben)
     const filteredTrackings = enrichedTrackings.filter(t => 
       t.dagenOnderweg >= daysMin && t.dagenOnderweg <= daysMax &&
-      (statusFilter === '' || t.status.toLowerCase().includes(statusFilter.toLowerCase()))
+      (statusFilter === '' || t.status.toLowerCase().includes(statusFilter.toLowerCase())) &&
+      (search === '' || t.customerName.toLowerCase().includes(search.toLowerCase()) || t.email.toLowerCase().includes(search.toLowerCase()) || t.trackingCode.toLowerCase().includes(search.toLowerCase()) || t.orderId.toString().includes(search))
     );
 
     // Voor accurate paginatie tellen we met dezelfde filters
