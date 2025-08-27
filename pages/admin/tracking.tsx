@@ -86,6 +86,15 @@ export default function TrackingDashboard() {
     min: '0',
     max: '999'
   });
+
+  useEffect(() => {
+    // Sync de inputvelden met de hoofd filter state.
+    // Dit zorgt ervoor dat de UI consistent is, bijv. na een reset.
+    setDayFilters({
+      min: String(filters.daysMin),
+      max: String(filters.daysMax),
+    });
+  }, [filters.daysMin, filters.daysMax]);
   
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -160,24 +169,18 @@ export default function TrackingDashboard() {
   const handleDayFilterChange = (type: 'min' | 'max', value: string) => {
     // Update de lokale state direct voor een responsieve UI
     setDayFilters(prev => ({ ...prev, [type]: value }));
-
+  
     // Debounce de daadwerkelijke filter-actie
-    // (In een echte app zou je hier een debounce hook gebruiken)
     setTimeout(() => {
-      const numericValue = parseInt(value);
-      if (!isNaN(numericValue)) {
-        if (type === 'min') {
-          handleFilterChange({ daysMin: numericValue });
-        } else {
-          handleFilterChange({ daysMax: numericValue });
-        }
+      const numericValue = parseInt(value, 10);
+      const isMin = type === 'min';
+  
+      if (isNaN(numericValue)) {
+        // Als het veld leeg is of geen nummer, reset naar default
+        handleFilterChange({ [isMin ? 'daysMin' : 'daysMax']: isMin ? 0 : 999 });
       } else {
-        // Als het veld leeg is, reset naar default
-        if (type === 'min') {
-          handleFilterChange({ daysMin: 0 });
-        } else {
-          handleFilterChange({ daysMax: 999 });
-        }
+        // Anders, gebruik de ingevoerde waarde
+        handleFilterChange({ [isMin ? 'daysMin' : 'daysMax']: numericValue });
       }
     }, 500); // 500ms delay
   };
